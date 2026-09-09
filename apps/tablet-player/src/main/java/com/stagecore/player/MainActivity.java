@@ -84,7 +84,31 @@ public final class MainActivity extends Activity {
         refreshSettingsFields();
         renderInfo("جاهز للعرض. تحكم OSC يعمل على UDP 9000.");
         setControlsVisible(!appSettings.showModeOnLaunch);
+        hideSystemUi();
         if (appSettings.autoDiscover) startDiscovery(false);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        hideSystemUi();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemUi();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (controlsVisible()) {
+            setControlsVisible(false);
+        } else if (player != null) {
+            player.identify();
+        }
+        hideSystemUi();
     }
 
     @Override
@@ -103,7 +127,7 @@ public final class MainActivity extends Activity {
         panel.setTextDirection(View.TEXT_DIRECTION_RTL);
 
         panel.addView(title("إعدادات StageCore Player"));
-        panel.addView(help("وضع العرض يبقى نظيف بدون كتابة. افتح/اخفِ الإعدادات بخمس ضغطات سريعة أعلى اليسار."));
+        panel.addView(help("وضع العرض مقفول ونظيف: الشاشة تبقى شغالة، أزرار النظام مخفية، والرجوع لا يخرج من التطبيق. افتح/اخفِ الإعدادات بخمس ضغطات سريعة أعلى اليسار."));
 
         info = text(13f);
         panel.addView(info);
@@ -186,8 +210,15 @@ public final class MainActivity extends Activity {
                 button("Live 3", v -> showResult(executor.goCue(3))),
                 button("Blackout 4", v -> showResult(executor.goCue(4))),
                 button("Clear", v -> showResult(player.clearBlackout())),
-                button("Identify", v -> showResult(player.identify())),
-                button("وضع العرض", v -> setControlsVisible(false))
+                button("Identify", v -> showResult(player.identify()))
+        ));
+
+        panel.addView(section("قفل العرض والخروج"));
+        panel.addView(help("الخروج متاح فقط من هنا بعد فتح الإعدادات. زر الرجوع لا يطلع من التطبيق أثناء العرض. زر الطاقة الفيزيائي يبقى تابع للنظام إلا إذا فعلت Screen Pinning / Lock Task من إعدادات أندرويد."));
+        panel.addView(rowButtons(
+                button("وضع العرض", v -> setControlsVisible(false)),
+                button("قفل التطبيق", v -> enterLockTaskMode()),
+                button("خروج من التطبيق", v -> safeExitApp())
         ));
 
         ScrollView scroll = new ScrollView(this);
@@ -311,6 +342,7 @@ public final class MainActivity extends Activity {
         player.setVideoScaleMode(appSettings.videoScaleMode);
         refreshSettingsFields();
         renderInfo("تم حفظ الإعدادات.");
+        hideSystemUi();
     }
 
     private void regenerateDeviceId() {
@@ -404,6 +436,7 @@ public final class MainActivity extends Activity {
             refreshSettingsFields();
             renderInfo("لوحة الإعدادات مفتوحة.");
         }
+        hideSystemUi();
     }
 
     private boolean controlsVisible() {
@@ -457,6 +490,33 @@ public final class MainActivity extends Activity {
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         }
+    }
+
+    private void hideSystemUi() {
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        );
+    }
+
+    private void enterLockTaskMode() {
+        try {
+            startLockTask();
+            renderInfo("تم طلب قفل التطبيق. إذا جهازك مفعل Screen Pinning أو Device Owner راح يمنع الخروج بالأزرار.");
+        } catch (IllegalStateException error) {
+            renderInfo("تعذر تفعيل قفل التطبيق من داخل التطبيق فقط. فعّل Screen Pinning من إعدادات أندرويد ثم جرب مرة ثانية.");
+        }
+        hideSystemUi();
+    }
+
+    private void safeExitApp() {
+        if (discovery != null) discovery.stop();
+        if (oscServer != null) oscServer.stop();
+        finish();
     }
 
     private void saveSettingsFromFieldsWithoutRender() {
