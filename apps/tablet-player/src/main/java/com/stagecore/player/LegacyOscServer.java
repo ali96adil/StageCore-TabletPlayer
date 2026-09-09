@@ -21,6 +21,7 @@ public final class LegacyOscServer {
     private DatagramSocket socket;
     private Thread thread;
     private volatile boolean running;
+    private String overrideLiveUrl;
 
     public LegacyOscServer(ManifestExecutor executor, TabletPlayer player) {
         this.executor = executor;
@@ -42,7 +43,7 @@ public final class LegacyOscServer {
     private void loop(int port) {
         try {
             socket = new DatagramSocket(port);
-            byte[] buffer = new byte[2048];
+            byte[] buffer = new byte[4096];
             while (running) {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
@@ -59,27 +60,52 @@ public final class LegacyOscServer {
         CommandResult result;
         String a = message.address;
         int first = message.intArgs.isEmpty() ? 1 : message.intArgs.get(0);
+        String firstString = message.stringArgs.isEmpty() ? null : message.stringArgs.get(0);
 
         if (a.equals("/theatre/all/identify") || a.equals("/theatre/player/identify")) {
             result = player.identify();
         } else if (a.equals("/theatre/all/black") || a.equals("/theatre/all/blackout") || a.equals("/theatre/player/blackout")) {
             result = player.blackout();
+        } else if (a.equals("/theatre/player/blackout/clear")) {
+            result = player.clearBlackout();
         } else if (a.equals("/theatre/all/play") || a.equals("/theatre/player/main/play")) {
             result = executor.playMain(first);
+        } else if (a.equals("/theatre/player/main/prepare")) {
+            result = executor.prepareMain(first);
+        } else if (a.equals("/theatre/player/main/pause")) {
+            result = player.pauseMain();
+        } else if (a.equals("/theatre/all/stop") || a.equals("/theatre/player/main/stop")) {
+            result = player.stopMain();
         } else if (a.equals("/theatre/all/overlay/play") || a.equals("/theatre/player/overlay/play")) {
             result = executor.playOverlay(first);
+        } else if (a.equals("/theatre/player/overlay/hide")) {
+            result = player.hideOverlay(first);
+        } else if (a.equals("/theatre/player/live/url")) {
+            overrideLiveUrl = firstString;
+            result = overrideLiveUrl == null
+                    ? CommandResult.failed("LIVE_URL_MISSING", "OSC string arg required")
+                    : CommandResult.completed("Live URL set");
         } else if (a.equals("/theatre/all/live/show") || a.equals("/theatre/player/live/show")) {
-            result = executor.showLive("live.camera.01");
+            if (firstString != null) {
+                result = player.showLive(firstString);
+            } else if (overrideLiveUrl != null) {
+                result = player.showLive(overrideLiveUrl);
+            } else {
+                result = executor.showLive("live.camera.01");
+            }
         } else if (a.equals("/theatre/all/live/hide") || a.equals("/theatre/player/live/hide")) {
             result = player.hideLive();
         } else if (a.equals("/theatre/all/cue/go") || a.equals("/theatre/player/cue/go")) {
             result = executor.goCue(first);
+        } else if (a.equals("/theatre/player/cue/go_id")) {
+            result = executor.goCueById(firstString);
         } else if (a.equals("/theatre/all/cue/prepare") || a.equals("/theatre/player/cue/prepare")) {
             result = executor.prepareCue(first);
+        } else if (a.equals("/theatre/player/cue/prepare_id")) {
+            result = executor.prepareCueById(firstString);
         } else {
             result = CommandResult.rejected("UNKNOWN_OSC", "Unknown OSC address " + a);
         }
-        // Keep the current MVP local-only. Command result transport is added in StageCoreClient.
         android.util.Log.i("StageCorePlayer", "OSC " + a + " -> " + result);
     }
 
@@ -89,20 +115,23 @@ public final class LegacyOscServer {
         String typeTags = offset < length ? readPaddedString(data, offset, length) : "";
         offset += paddedLength(typeTags);
         List<Integer> ints = new ArrayList<>();
+        List<String> strings = new ArrayList<>();
         if (typeTags != null && typeTags.startsWith(",")) {
-            for (int i = 1; i < typeTags.length() && offset + 4 <= length; i++) {
-                if (typeTags.charAt(i) == 'i') {
+            for (int i = 1; i < typeTags.length() && offset < length; i++) {
+                char tag = typeTags.charAt(i);
+                if (tag == 'i' && offset + 4 <= length) {
                     ints.add(ByteBuffer.wrap(data, offset, 4).order(ByteOrder.BIG_ENDIAN).getInt());
                     offset += 4;
-                } else if (typeTags.charAt(i) == 'f') {
+                } else if (tag == 'f' && offset + 4 <= length) {
                     offset += 4;
-                } else if (typeTags.charAt(i) == 's') {
-                    String ignored = readPaddedString(data, offset, length);
-                    offset += paddedLength(ignored);
+                } else if (tag == 's') {
+                    String value = readPaddedString(data, offset, length);
+                    strings.add(value);
+                    offset += paddedLength(value);
                 }
             }
         }
-        return new OscMessage(address, ints);
+        return new OscMessage(address, ints, strings);
     }
 
     private String readPaddedString(byte[] data, int offset, int length) {
@@ -120,9 +149,11 @@ public final class LegacyOscServer {
     private static final class OscMessage {
         final String address;
         final List<Integer> intArgs;
-        OscMessage(String address, List<Integer> intArgs) {
+        final List<String> stringArgs;
+        OscMessage(String address, List<Integer> intArgs, List<String> stringArgs) {
             this.address = address;
             this.intArgs = intArgs;
+            this.stringArgs = stringArgs;
         }
     }
 }
