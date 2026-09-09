@@ -50,7 +50,10 @@ public final class StageCoreClient {
                 "tablet.media.overlay.play",
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
-                "tablet.media.live.hide"
+                "tablet.media.live.hide",
+                "tablet.health.heartbeat",
+                "tablet.health.read",
+                "tablet.alert.problem"
         ));
         capabilities.addAll(StageCoreSettingsContract.settingsCapabilities());
         return capabilities;
@@ -65,6 +68,8 @@ public final class StageCoreClient {
                 + " snapshot=" + manifest.runtimeSnapshotId
                 + " manifest=" + manifest.tabletManifestId
                 + " controllable_settings=" + StageCoreSettingsContract.supportedSettingKeys()
+                + " heartbeat_schema=stagecore.tablet.health/1"
+                + " heartbeat_default_interval_seconds=10"
                 + " capabilities=" + baselineCapabilities();
     }
 }
