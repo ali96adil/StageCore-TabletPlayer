@@ -26,33 +26,50 @@ The app also has a bundled sample manifest, so `tablet_manifest.json` is optiona
 
 1. Install and open `StageCore Player`.
 2. The app should open to a clean black/show surface with no debug text covering the stage image.
-3. Rotate the tablet and confirm portrait and landscape are both allowed.
-4. Tap the top-left corner five times quickly to show the controls/debug panel.
-5. Tap `Show mode` or tap the top-left corner five times again to hide the controls/debug panel.
+3. Rotate the tablet and confirm portrait and landscape are both allowed when orientation is set to automatic.
+4. Tap the top-left corner five times quickly to show the Arabic settings/control panel.
+5. Tap `وضع العرض` or tap the top-left corner five times again to hide the settings/control panel.
+
+## Arabic settings panel
+
+Open the panel with five quick top-left taps and verify:
+
+- `ID التابلت` can be edited and saved.
+- `اسم الجهاز` can be edited and saved.
+- `عنوان السيرفر` and `البورت` can be edited and saved.
+- `اكتشاف تلقائي Bonjour` is available and the `بحث تلقائي` button searches for `_stagecore._tcp.` and `_stagecore-hub._tcp.` services.
+- Brightness slider changes screen brightness and saves it.
+- Video scale buttons support `Full / ملء`, `Fit / احتواء`, and `Crop / قص`.
+- Orientation buttons support automatic, portrait, and landscape.
+- `تجهيز مجلد الفيديوات` creates/checks `/sdcard/TheatreVideos/`.
+- `فحص ملفات الفيديو` reports available `main_*.mp4`, `overlay_*.mp4`, manifest status, and missing manifest references.
+- `فحص الصلاحيات` reports storage access state.
+- The interface text is Arabic-first while code/API names remain English.
 
 ## Manual launch test
 
-1. Open the hidden controls/debug panel with five quick taps in the top-left corner.
+1. Open the hidden settings/control panel with five quick taps in the top-left corner.
 2. Allow/manage storage access when Android asks for it.
-3. Confirm the debug panel shows:
+3. Confirm the panel shows:
    - stable tablet device id
+   - editable device name
    - active manifest source
    - media folder path
    - Tablet Cue -> StageCore Cue mapping
-4. Tap `Prepare cue 1`.
-5. Tap `GO cue 1`.
+4. Tap `Prepare 1`.
+5. Tap `GO 1`.
 6. Confirm `main_01.mp4` plays and loops.
-7. Tap `GO cue 2 overlay`.
+7. Tap `Overlay 2`.
 8. Confirm `overlay_01.mp4` fades above the main video, then hides while main continues.
-9. Tap `GO cue 3 live`.
+9. Tap `Live 3`.
 10. Confirm the live URL layer appears if the URL is reachable on the local network.
-11. Tap `GO cue 4 blackout`.
+11. Tap `Blackout 4`.
 12. Confirm blackout covers visible media without crashing the app.
-13. Tap `Clear blackout`.
+13. Tap `Clear`.
 
 ## Show mode
 
-Controls and status text are hidden by default. Tap the top-left corner five times quickly to show or hide the debug panel.
+Controls and status text are hidden by default. Tap the top-left corner five times quickly to show or hide the Arabic settings/control panel.
 
 `Identify` may briefly show a status badge, then it should disappear again if the panel is not pinned open.
 
@@ -82,5 +99,7 @@ Useful commands:
 - Tablet cue sequence can differ from StageCore cue sequence.
 - The manifest is scoped by `stagecore_project_id`, `runtime_snapshot_id`, and `tablet_manifest_id`.
 - Clean show mode has no persistent writing over the video.
-- Portrait and landscape orientations are both allowed.
+- Portrait and landscape orientations are both available from settings.
+- Device ID, device name, server host/port, brightness, scale mode, orientation, and show mode preferences persist after restart.
+- Bonjour discovery fills server host/port when a matching StageCore service is found.
 - Legacy OSC remains a rehearsal/debug path, not the final StageCore authority path.
