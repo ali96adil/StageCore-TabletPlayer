@@ -122,11 +122,12 @@ public final class ManifestExecutor {
             case "main.stop":
                 return player.stopMain();
             case "overlay.play":
-                requireMedia(action);
+                if (missingMedia(action)) return CommandResult.failed("MEDIA_KEY_NOT_FOUND", "No media key " + action.mediaKey);
                 return player.playOverlay(mediaResolver.resolveFile(activeManifest(), action.mediaKey), action.dissolveInMs, action.dissolveOutMs);
             case "overlay.hide":
                 return player.hideOverlay(action.dissolveOutMs);
             case "live.show":
+                if (missingMedia(action)) return CommandResult.failed("MEDIA_KEY_NOT_FOUND", "No media key " + action.mediaKey);
                 return player.showLive(mediaResolver.resolveLiveUrl(activeManifest(), action.mediaKey));
             case "live.hide":
                 return player.hideLive();
@@ -139,10 +140,10 @@ public final class ManifestExecutor {
         }
     }
 
-    private MediaItemRef requireMedia(TabletAction action) {
+    private boolean missingMedia(TabletAction action) {
+        if (action.mediaKey == null || action.mediaKey.trim().isEmpty()) return true;
         MediaItemRef media = activeManifest().media.get(action.mediaKey);
-        if (media == null) throw new IllegalArgumentException("No media key " + action.mediaKey);
-        return media;
+        return media == null;
     }
 
     private boolean matches(String incoming, String active) {
