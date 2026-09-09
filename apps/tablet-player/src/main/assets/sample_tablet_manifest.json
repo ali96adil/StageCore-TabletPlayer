@@ -39,6 +39,16 @@
       "actions": [
         { "action_id": "action_live_01", "type": "live.show", "media_key": "live.camera.01" }
       ]
+    },
+    {
+      "tablet_cue_id": "tablet_cue_004",
+      "tablet_sequence": 4,
+      "source_stagecore_cue_id": "stagecore_cue_024",
+      "source_stagecore_sequence": 24,
+      "name": "Blackout",
+      "actions": [
+        { "action_id": "action_blackout_01", "type": "blackout" }
+      ]
     }
   ]
 }
