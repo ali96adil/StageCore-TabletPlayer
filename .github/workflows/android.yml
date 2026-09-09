@@ -22,3 +22,9 @@ jobs:
           gradle-version: 8.10.2
       - name: Build tablet player debug APK
         run: gradle :apps:tablet-player:assembleDebug --no-daemon
+      - name: Upload tablet player debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: stagecore-player-debug-apk
+          path: apps/tablet-player/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
