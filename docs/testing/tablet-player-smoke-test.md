@@ -41,10 +41,19 @@ Open the panel with five quick top-left taps and verify:
 - Brightness slider changes screen brightness and saves it.
 - Video scale buttons support `Full / ملء`, `Fit / احتواء`, and `Crop / قص`.
 - Orientation buttons support automatic, portrait, and landscape.
-- `تجهيز مجلد الفيديوات` creates/checks `/sdcard/TheatreVideos/`.
-- `فحص ملفات الفيديو` reports available `main_*.mp4`, `overlay_*.mp4`, manifest status, and missing manifest references.
+- `تجهيز المجلد` creates/checks `/sdcard/TheatreVideos/`.
+- `فتح مجلد الفيديوات` attempts to open the Android file manager or folder picker for the media folder.
+- `فحص الملفات` reports available `main_*.mp4`, `overlay_*.mp4`, manifest status, and missing manifest references.
+- `إعادة تحميل + فحص` reloads `tablet_manifest.json`, rescans files, and prints a cue preview without restarting the app.
+- `عرض Cue Preview` shows which cue will use which media key/file/URL. Cue order is independent from file names.
 - `فحص الصلاحيات` reports storage access state.
 - The interface text is Arabic-first while code/API names remain English.
+
+## Cue order and file names
+
+Cue order is controlled by `tablet_manifest.json`, not by the numeric order of video file names.
+
+Example: `Cue 1` may play `main_02.mp4`, and `Cue 2` may play `main_01.mp4`, as long as the manifest maps those cues to those media keys.
 
 ## StageCore settings-control foundation
 
@@ -76,22 +85,24 @@ StageCore should later use these capabilities to push settings, request a file s
 
 1. Open the hidden settings/control panel with five quick taps in the top-left corner.
 2. Allow/manage storage access when Android asks for it.
-3. Confirm the panel shows:
+3. Tap `تجهيز المجلد`.
+4. Tap `فتح مجلد الفيديوات` and copy or verify media files in `/sdcard/TheatreVideos/`.
+5. Tap `إعادة تحميل + فحص`.
+6. Confirm the panel shows:
    - stable tablet device id
    - editable device name
    - active manifest source
    - media folder path
    - Tablet Cue -> StageCore Cue mapping
-4. Tap `Prepare 1`.
-5. Tap `GO 1`.
-6. Confirm `main_01.mp4` plays and loops.
-7. Tap `Overlay 2`.
-8. Confirm `overlay_01.mp4` fades above the main video, then hides while main continues.
-9. Tap `Live 3`.
-10. Confirm the live URL layer appears if the URL is reachable on the local network.
-11. Tap `Blackout 4`.
-12. Confirm blackout covers visible media without crashing the app.
-13. Tap `Clear`.
+   - Cue Preview mapping cues to files/URLs
+7. Use `رقم Cue`, `Prepare Cue`, and `GO Cue` to test any cue number without adding more buttons.
+8. Tap `GO 1` and confirm the expected main file from Cue Preview plays and loops.
+9. Tap `Overlay 2` and confirm the expected overlay file fades above the main video, then hides while main continues.
+10. Paste or type a local stream URL in `Live URL` and tap `Test Live`.
+11. Tap `Hide Live` to clear the live layer.
+12. Tap `Blackout 4`.
+13. Confirm blackout covers visible media without crashing the app.
+14. Tap `Clear`.
 
 ## Show mode
 
@@ -122,7 +133,10 @@ Useful commands:
 ## Acceptance
 
 - Missing media reports a visible failure instead of playing the wrong file.
-- Tablet cue sequence can differ from StageCore cue sequence.
+- Tablet cue sequence can differ from StageCore cue sequence and from file-name order.
+- The app can open or guide the operator to `/sdcard/TheatreVideos/` from the settings panel.
+- Manual Cue testing works for cue numbers beyond the fixed quick-test buttons.
+- Manual Live URL testing works without editing the manifest.
 - The manifest is scoped by `stagecore_project_id`, `runtime_snapshot_id`, and `tablet_manifest_id`.
 - Clean show mode has no persistent writing over the video.
 - Portrait and landscape orientations are both available from settings.
