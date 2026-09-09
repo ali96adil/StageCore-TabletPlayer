@@ -1,8 +1,10 @@
 package com.stagecore.player;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -22,12 +24,18 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public final class MainActivity extends Activity {
+    private static final int REQUEST_RUNTIME_PERMISSIONS = 1001;
+
     private TabletPlayer player;
     private ManifestStore manifestStore;
     private ManifestExecutor executor;
@@ -84,6 +92,7 @@ public final class MainActivity extends Activity {
         refreshSettingsFields();
         renderInfo("جاهز للعرض. تحكم OSC يعمل على UDP 9000.");
         setControlsVisible(!appSettings.showModeOnLaunch);
+        requestStartupPermissions();
         hideSystemUi();
         if (appSettings.autoDiscover) startDiscovery(false);
     }
@@ -109,6 +118,14 @@ public final class MainActivity extends Activity {
             player.identify();
         }
         hideSystemUi();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_RUNTIME_PERMISSIONS) {
+            showPanelMessage("تم تحديث حالة الصلاحيات.\n" + storagePermissionSummary());
+        }
     }
 
     @Override
@@ -191,11 +208,12 @@ public final class MainActivity extends Activity {
         panel.addView(section("ملفات الفيديو والصلاحيات"));
         panel.addView(help(mediaResolver.mediaFolderHelpArabic()));
         panel.addView(rowButtons(
-                button("تجهيز مجلد الفيديوات", v -> renderInfo(mediaResolver.prepareFolderSummary())),
-                button("فحص ملفات الفيديو", v -> renderInfo(mediaResolver.scanSummary(manifestStore.activeManifest())))
+                button("تجهيز مجلد الفيديوات", v -> showPanelMessage(mediaResolver.prepareFolderSummary())),
+                button("فحص ملفات الفيديو", v -> showPanelMessage(mediaResolver.scanSummary(manifestStore.activeManifest())))
         ));
         panel.addView(rowButtons(
-                button("فحص الصلاحيات", v -> renderInfo(storagePermissionSummary())),
+                button("طلب كل الصلاحيات", v -> requestAllPermissionsFromSettings()),
+                button("فحص الصلاحيات", v -> showPanelMessage(storagePermissionSummary())),
                 button("فتح صلاحيات التخزين", v -> openStorageSettings()),
                 button("إعادة تحميل المنفست", v -> reloadManifest())
         ));
@@ -218,6 +236,7 @@ public final class MainActivity extends Activity {
         panel.addView(rowButtons(
                 button("وضع العرض", v -> setControlsVisible(false)),
                 button("قفل التطبيق", v -> enterLockTaskMode()),
+                button("إعدادات القفل", v -> openKioskHelpSettings()),
                 button("خروج من التطبيق", v -> safeExitApp())
         ));
 
@@ -341,7 +360,7 @@ public final class MainActivity extends Activity {
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
         refreshSettingsFields();
-        renderInfo("تم حفظ الإعدادات.");
+        showPanelMessage("تم حفظ الإعدادات.");
         hideSystemUi();
     }
 
@@ -350,21 +369,21 @@ public final class MainActivity extends Activity {
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         refreshSettingsFields();
-        renderInfo("تم توليد ID جديد لهذا التابلت.");
+        showPanelMessage("تم توليد ID جديد لهذا التابلت.");
     }
 
     private void setScale(String scale) {
         appSettings.videoScaleMode = scale;
         appSettings.save(this);
         player.setVideoScaleMode(scale);
-        renderInfo("تم تغيير حجم الفيديو إلى: " + scale);
+        showPanelMessage("تم تغيير حجم الفيديو إلى: " + scale);
     }
 
     private void setOrientation(String orientation) {
         appSettings.orientationMode = orientation;
         appSettings.save(this);
         applyOrientation(orientation);
-        renderInfo("تم تغيير اتجاه العرض إلى: " + orientation);
+        showPanelMessage("تم تغيير اتجاه العرض إلى: " + orientation);
     }
 
     private void startDiscovery(boolean visibleFeedback) {
@@ -379,7 +398,7 @@ public final class MainActivity extends Activity {
                 refreshSettingsFields();
                 String message = "تم العثور على StageCore: " + name + " — " + appSettings.serverLabel() + " — " + serviceType;
                 if (discoveryInfo != null) discoveryInfo.setText(message);
-                renderInfo(message);
+                showPanelMessage(message);
             }
 
             @Override
@@ -393,11 +412,12 @@ public final class MainActivity extends Activity {
     private void stopDiscovery() {
         if (discovery != null) discovery.stop();
         if (discoveryInfo != null) discoveryInfo.setText("تم إيقاف البحث التلقائي.");
+        toast("تم إيقاف البحث التلقائي.");
     }
 
     private void reloadManifest() {
         loadExternalOrSample();
-        renderInfo("تمت إعادة تحميل المنفست.");
+        showPanelMessage("تمت إعادة تحميل المنفست.");
     }
 
     private void loadExternalOrSample() {
@@ -405,7 +425,23 @@ public final class MainActivity extends Activity {
     }
 
     private void showResult(CommandResult result) {
-        renderInfo(result.toString());
+        showPanelMessage(result.toString());
+    }
+
+    private void showPanelMessage(String message) {
+        renderInfo(message);
+        toast(firstLine(message));
+        hideSystemUi();
+    }
+
+    private String firstLine(String message) {
+        if (message == null || message.trim().isEmpty()) return "تم";
+        int idx = message.indexOf('\n');
+        return idx >= 0 ? message.substring(0, idx) : message;
+    }
+
+    private void toast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     private void renderInfo(String message) {
@@ -456,24 +492,72 @@ public final class MainActivity extends Activity {
         return true;
     }
 
-    private void openStorageSettings() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        } else {
-            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
+    private void requestStartupPermissions() {
+        requestRuntimeStoragePermissions();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            toast("افتح الإعدادات مرة واحدة وفعّل صلاحية إدارة كل الملفات حتى نقرأ الفيديوات.");
+            openStorageSettings();
         }
     }
 
+    private void requestAllPermissionsFromSettings() {
+        requestRuntimeStoragePermissions();
+        showPanelMessage("طلب الصلاحيات بدأ. إذا ظهرت شاشة Android فعّل السماح، وبعدها ارجع للتطبيق.\n" + storagePermissionSummary());
+        openStorageSettings();
+    }
+
+    private void requestRuntimeStoragePermissions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        List<String> permissions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.READ_MEDIA_VIDEO);
+            }
+        } else if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+        }
+        if (!permissions.isEmpty()) {
+            requestPermissions(permissions.toArray(new String[0]), REQUEST_RUNTIME_PERMISSIONS);
+        }
+    }
+
+    private void openStorageSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            } else {
+                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }
+        } catch (Exception error) {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
+        }
+    }
+
+    private void openKioskHelpSettings() {
+        showPanelMessage("حتى قفل الأزرار يصير أقوى: فعّل Screen Pinning من إعدادات Android، بعدها ارجع واضغط قفل التطبيق. زر التشغيل الفيزيائي ما ينقفل بالكامل إلا بوضع Device Owner/Kiosk.");
+        startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));
+    }
+
     private String storagePermissionSummary() {
+        boolean runtimeStorage;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            runtimeStorage = true;
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            runtimeStorage = checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            runtimeStorage = checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        }
         boolean allFiles = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
         return "فحص الصلاحيات"
+                + "\nقراءة الفيديوات: " + (runtimeStorage ? "مفعّلة" : "غير مفعّلة")
                 + "\nAll files access: " + (allFiles ? "مفعّل" : "غير مفعّل")
                 + "\nمجلد الفيديوات: " + (mediaResolver.baseDir().exists() ? "موجود" : "غير موجود")
-                + "\nإذا الملفات ما تنقرأ، افتح صلاحيات التخزين وفعّل Allow management of all files.";
+                + "\nقفل الأزرار: أقصى حماية داخل التطبيق مفعّلة. للقفل الأقوى فعّل Screen Pinning / Lock Task من النظام."
+                + "\nملاحظة: صلاحيات المطوّر وDevice Owner ما يطلبها التطبيق مثل الصلاحيات العادية، لازم تتفعل من النظام أو ADB.";
     }
 
     private void applyScreenBrightness(int percent) {
@@ -506,9 +590,9 @@ public final class MainActivity extends Activity {
     private void enterLockTaskMode() {
         try {
             startLockTask();
-            renderInfo("تم طلب قفل التطبيق. إذا جهازك مفعل Screen Pinning أو Device Owner راح يمنع الخروج بالأزرار.");
+            showPanelMessage("تم طلب قفل التطبيق. إذا جهازك مفعل Screen Pinning أو Device Owner راح يمنع الخروج بالأزرار.");
         } catch (IllegalStateException error) {
-            renderInfo("تعذر تفعيل قفل التطبيق من داخل التطبيق فقط. فعّل Screen Pinning من إعدادات أندرويد ثم جرب مرة ثانية.");
+            showPanelMessage("تعذر تفعيل قفل التطبيق من داخل التطبيق فقط. فعّل Screen Pinning من إعدادات أندرويد ثم جرب مرة ثانية.");
         }
         hideSystemUi();
     }
