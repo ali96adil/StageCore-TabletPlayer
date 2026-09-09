@@ -27,6 +27,8 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 
 import com.stagecore.player.model.CommandResult;
+import com.stagecore.player.model.MediaItemRef;
+import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
@@ -50,6 +52,8 @@ public final class MainActivity extends Activity {
     private EditText deviceNameInput;
     private EditText serverHostInput;
     private EditText serverPortInput;
+    private EditText cueNumberInput;
+    private EditText liveUrlInput;
     private CheckBox autoDiscoverCheck;
     private CheckBox showModeCheck;
     private CheckBox showLockCheck;
@@ -200,7 +204,8 @@ public final class MainActivity extends Activity {
         panel.addView(help("Heartbeat: " + appSettings.heartbeatLabel()));
         panel.addView(rowButtons(
                 button("فحص قبل العرض", v -> renderInfo(preShowCheckSummary())),
-                button("إرسال حالة الآن", v -> pokeHeartbeat())
+                button("إرسال حالة الآن", v -> pokeHeartbeat()),
+                button("دخول وضع العرض الآن", v -> enterShowModeNow())
         ));
 
         panel.addView(section("الصورة والسطوع"));
@@ -235,14 +240,37 @@ public final class MainActivity extends Activity {
 
         panel.addView(section("ملفات الفيديو والصلاحيات"));
         panel.addView(help(mediaResolver.mediaFolderHelpArabic()));
+        panel.addView(help("ترتيب الكيو مستقل عن أسماء الملفات: ممكن Cue 1 يشغل main_02 إذا المنفست يطلب هذا."));
         panel.addView(rowButtons(
-                button("تجهيز مجلد الفيديوات", v -> renderInfo(mediaResolver.prepareFolderSummary())),
-                button("فحص ملفات الفيديو", v -> renderInfo(mediaResolver.scanSummary(manifestStore.activeManifest())))
+                button("تجهيز المجلد", v -> renderInfo(mediaResolver.prepareFolderSummary())),
+                button("فتح مجلد الفيديوات", v -> openMediaFolder()),
+                button("فحص الملفات", v -> renderInfo(compactMediaScanSummary()))
         ));
         panel.addView(rowButtons(
+                button("إعادة تحميل + فحص", v -> reloadManifestAndScan()),
                 button("فحص الصلاحيات", v -> renderInfo(storagePermissionSummary())),
-                button("فتح صلاحيات التخزين", v -> openStorageSettings()),
-                button("إعادة تحميل المنفست", v -> reloadManifest())
+                button("فتح صلاحيات التخزين", v -> openStorageSettings())
+        ));
+        panel.addView(rowButtons(
+                button("عرض Cue Preview", v -> renderInfo(cuePreviewSummary()))
+        ));
+
+        panel.addView(section("اختبار Cue يدوي"));
+        cueNumberInput = editText();
+        cueNumberInput.setText("1");
+        panel.addView(field("رقم Cue", cueNumberInput));
+        panel.addView(rowButtons(
+                button("Prepare Cue", v -> showResult(executor.prepareCue(selectedCueNumber()))),
+                button("GO Cue", v -> showResult(executor.goCue(selectedCueNumber())))
+        ));
+
+        panel.addView(section("اختبار Live يدوي"));
+        liveUrlInput = editText();
+        liveUrlInput.setText("http://192.168.3.80:81/stream");
+        panel.addView(field("Live URL", liveUrlInput));
+        panel.addView(rowButtons(
+                button("Test Live", v -> testLiveUrl()),
+                button("Hide Live", v -> showResult(player.hideLive()))
         ));
 
         panel.addView(section("اختبار سريع"));
@@ -459,6 +487,12 @@ public final class MainActivity extends Activity {
         pokeHeartbeat();
     }
 
+    private void reloadManifestAndScan() {
+        loadExternalOrSample();
+        renderInfo("تمت إعادة تحميل المنفست.\n\n" + compactMediaScanSummary() + "\n\n" + cuePreviewSummary());
+        pokeHeartbeat();
+    }
+
     private void loadExternalOrSample() {
         manifestStore.tryLoadFromDiskOrSample(mediaResolver.manifestFile());
     }
@@ -534,6 +568,27 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void openMediaFolder() {
+        mediaResolver.ensureBaseDir();
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.parse("content://com.android.externalstorage.documents/root/primary"), "vnd.android.document/root");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        try {
+            startActivity(intent);
+            renderInfo("تم طلب فتح مدير الملفات.\nالمجلد المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath());
+        } catch (Exception ignored) {
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            try {
+                startActivity(picker);
+                renderInfo("اختر مجلد TheatreVideos يدويًا.\nالمسار المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath());
+            } catch (Exception failed) {
+                lastError = "File manager unavailable";
+                renderInfo("ما كدرت أفتح مدير الملفات تلقائيًا.\nافتح File Manager يدويًا وروح إلى:\n" + mediaResolver.baseDir().getAbsolutePath());
+            }
+        }
+    }
+
     private String storagePermissionSummary() {
         return "فحص الصلاحيات"
                 + "\nAll files access: " + storagePermissionState()
@@ -547,15 +602,72 @@ public final class MainActivity extends Activity {
     }
 
     private String preShowCheckSummary() {
-        String scan = mediaResolver.scanSummary(manifestStore.activeManifest());
+        String scan = compactMediaScanSummary();
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
-        boolean missing = scan.contains("النواقص: 0") ? false : true;
+        boolean missing = !scan.contains("النواقص: 0");
         String status = hasPermission && !missing ? "READY ✅" : "CHECK NEEDED ⚠️";
         return "فحص قبل العرض: " + status
                 + "\nالصلاحيات: " + storagePermissionState()
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
-                + "\n" + scan;
+                + "\n\n" + scan
+                + "\n\n" + cuePreviewSummary();
+    }
+
+    private String compactMediaScanSummary() {
+        String scan = mediaResolver.scanSummary(manifestStore.activeManifest());
+        if (scan.contains("النواقص: 0")) {
+            return "READY ✅\n" + scan;
+        }
+        return "MISSING / CHECK ⚠️\n" + scan;
+    }
+
+    private String cuePreviewSummary() {
+        TabletManifest manifest = manifestStore.activeManifest();
+        if (manifest == null) return "Cue Preview: لا يوجد manifest.";
+        StringBuilder builder = new StringBuilder("Cue Preview");
+        builder.append("\nملاحظة: رقم الكيو لا يفرض اسم الفيديو. المنفست هو الذي يحدد الملف.");
+        for (TabletCue cue : manifest.cues) {
+            builder.append("\nCue ").append(cue.tabletSequence)
+                    .append(" — ").append(cue.name);
+            for (TabletAction action : cue.actions) {
+                builder.append("\n  ")
+                        .append(action.type)
+                        .append(" → ")
+                        .append(mediaLabel(manifest, action.mediaKey));
+            }
+        }
+        return builder.toString();
+    }
+
+    private String mediaLabel(TabletManifest manifest, String mediaKey) {
+        if (mediaKey == null || mediaKey.trim().isEmpty()) return "no media";
+        MediaItemRef item = manifest.media.get(mediaKey);
+        if (item == null) return mediaKey + " = MISSING KEY";
+        if (item.file != null && !item.file.trim().isEmpty()) return mediaKey + " = " + item.file;
+        if (item.url != null && !item.url.trim().isEmpty()) return mediaKey + " = " + item.url;
+        return mediaKey + " = empty";
+    }
+
+    private int selectedCueNumber() {
+        return parsePort(value(cueNumberInput, "1"), 1);
+    }
+
+    private void testLiveUrl() {
+        String url = value(liveUrlInput, "");
+        if (url.trim().isEmpty()) {
+            lastError = "Live URL missing";
+            renderInfo("Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream");
+            return;
+        }
+        showResult(player.showLive(url));
+    }
+
+    private void enterShowModeNow() {
+        saveSettingsFromFieldsWithoutRender();
+        setControlsVisible(false);
+        applyShowLockSurface();
+        pokeHeartbeat();
     }
 
     private void updateReadinessBadge() {
