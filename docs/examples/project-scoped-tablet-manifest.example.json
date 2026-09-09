@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "manifest_id": "tablet_manifest_blind_show_snapshot_001",
+  "show_name": "Example Show",
+  "stagecore_project_id": "stagecore_project_example_001",
+  "runtime_snapshot_id": "runtime_snapshot_example_001",
+  "created_at": "2026-09-09T12:25:00Z",
+  "target_device_type": "TABLET_PLAYER",
+  "media_root_hint": "/sdcard/TheatreVideos",
+  "media": {
+    "main_01": {
+      "type": "main",
+      "filename": "main_01.mp4",
+      "required": true
+    },
+    "overlay_01": {
+      "type": "overlay",
+      "filename": "overlay_01.mp4",
+      "required": true
+    },
+    "live_camera_01": {
+      "type": "live",
+      "url_key": "live.camera.primary",
+      "required": false
+    }
+  },
+  "tablet_cues": [
+    {
+      "tablet_cue_id": "tablet_cue_001",
+      "tablet_sequence": 1,
+      "display_name": "Main video starts",
+      "source_stagecore_cue_id": "stagecore_cue_010",
+      "source_stagecore_sequence": 10,
+      "actions": [
+        {
+          "tablet_action_id": "tablet_action_001_main_prepare_play",
+          "capability": "tablet.media.main.play",
+          "media_key": "main_01",
+          "transition": {
+            "type": "cut"
+          }
+        }
+      ]
+    },
+    {
+      "tablet_cue_id": "tablet_cue_002",
+      "tablet_sequence": 2,
+      "display_name": "Overlay dissolve",
+      "source_stagecore_cue_id": "stagecore_cue_014",
+      "source_stagecore_sequence": 14,
+      "actions": [
+        {
+          "tablet_action_id": "tablet_action_002_overlay_dissolve",
+          "capability": "tablet.media.overlay.play",
+          "media_key": "overlay_01",
+          "transition": {
+            "type": "dissolve",
+            "in_ms": 1000,
+            "out_ms": 1000,
+            "auto_hide_on_end": true
+          }
+        }
+      ]
+    },
+    {
+      "tablet_cue_id": "tablet_cue_003",
+      "tablet_sequence": 3,
+      "display_name": "Show live camera",
+      "source_stagecore_cue_id": "stagecore_cue_022",
+      "source_stagecore_sequence": 22,
+      "actions": [
+        {
+          "tablet_action_id": "tablet_action_003_live_show",
+          "capability": "tablet.media.live.show",
+          "media_key": "live_camera_01",
+          "transition": {
+            "type": "dissolve",
+            "in_ms": 750,
+            "out_ms": 750
+          }
+        }
+      ]
+    }
+  ]
+}
