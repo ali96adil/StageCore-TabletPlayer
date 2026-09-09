@@ -1,0 +1,44 @@
+{
+  "schema_version": "tablet_manifest/1",
+  "stagecore_project_id": "project_al_omian_demo",
+  "runtime_snapshot_id": "snapshot_demo_001",
+  "tablet_manifest_id": "tablet_manifest_demo_001",
+  "show_name": "العميان",
+  "media": {
+    "main.01": { "type": "main", "file": "main_01.mp4" },
+    "overlay.01": { "type": "overlay", "file": "overlay_01.mp4" },
+    "live.camera.01": { "type": "live", "url": "http://192.168.3.80:81/stream" }
+  },
+  "tablet_cues": [
+    {
+      "tablet_cue_id": "tablet_cue_001",
+      "tablet_sequence": 1,
+      "source_stagecore_cue_id": "stagecore_cue_010",
+      "source_stagecore_sequence": 10,
+      "name": "Start main video",
+      "actions": [
+        { "action_id": "action_main_01", "type": "main.play", "media_key": "main.01" }
+      ]
+    },
+    {
+      "tablet_cue_id": "tablet_cue_002",
+      "tablet_sequence": 2,
+      "source_stagecore_cue_id": "stagecore_cue_014",
+      "source_stagecore_sequence": 14,
+      "name": "Overlay dissolve",
+      "actions": [
+        { "action_id": "action_overlay_01", "type": "overlay.play", "media_key": "overlay.01", "dissolve_in_ms": 1000, "dissolve_out_ms": 1000 }
+      ]
+    },
+    {
+      "tablet_cue_id": "tablet_cue_003",
+      "tablet_sequence": 3,
+      "source_stagecore_cue_id": "stagecore_cue_022",
+      "source_stagecore_sequence": 22,
+      "name": "Show live camera",
+      "actions": [
+        { "action_id": "action_live_01", "type": "live.show", "media_key": "live.camera.01" }
+      ]
+    }
+  ]
+}
