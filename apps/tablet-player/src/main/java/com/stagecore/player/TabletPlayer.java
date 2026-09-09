@@ -23,9 +23,13 @@ public final class TabletPlayer {
     private VideoView liveVideo;
     private View blackoutView;
     private TextView statusView;
+    private File preparedMainFile;
     private String currentMain = "none";
+    private String preparedMain = "none";
     private String currentOverlay = "none";
     private String currentLive = "none";
+    private boolean mainPlaying = false;
+    private boolean blackoutVisible = false;
 
     public TabletPlayer(Context context) {
         this.context = context;
@@ -71,11 +75,17 @@ public final class TabletPlayer {
 
     public CommandResult prepareMain(File file) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
+        preparedMainFile = file;
         mainVideo.setVideoURI(Uri.fromFile(file));
-        mainVideo.seekTo(1);
-        currentMain = file.getName();
-        showStatus("Prepared main: " + currentMain);
+        mainVideo.setOnPreparedListener(mp -> mainVideo.seekTo(1));
+        preparedMain = file.getName();
+        showStatus("Prepared main: " + preparedMain);
         return CommandResult.completed("Prepared main " + file.getName());
+    }
+
+    public CommandResult playPreparedMain() {
+        if (preparedMainFile == null) return CommandResult.failed("MAIN_NOT_PREPARED", "No prepared main media");
+        return playMain(preparedMainFile);
     }
 
     public CommandResult playMain(File file) {
@@ -85,14 +95,41 @@ public final class TabletPlayer {
         mainVideo.setOnPreparedListener(mp -> {
             mp.setLooping(true);
             mainVideo.start();
+            mainPlaying = true;
+            showStatus("Playing main: " + currentMain);
         });
         currentMain = file.getName();
-        showStatus("Playing main: " + currentMain);
+        preparedMainFile = file;
+        preparedMain = file.getName();
+        showStatus("Loading main: " + currentMain);
         return CommandResult.completed("Playing main " + file.getName());
+    }
+
+    public CommandResult pauseMain() {
+        if (mainVideo != null && mainVideo.isPlaying()) {
+            mainVideo.pause();
+            mainPlaying = false;
+            showStatus("Main paused");
+            return CommandResult.completed("Main paused");
+        }
+        mainPlaying = false;
+        showStatus("Main already paused");
+        return CommandResult.completed("Main already paused");
+    }
+
+    public CommandResult stopMain() {
+        if (mainVideo != null) {
+            mainVideo.stopPlayback();
+        }
+        mainPlaying = false;
+        currentMain = "none";
+        showStatus("Main stopped");
+        return CommandResult.completed("Main stopped");
     }
 
     public CommandResult playOverlay(File file, int dissolveInMs, int dissolveOutMs) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
+        overlayVideo.animate().cancel();
         overlayVideo.setAlpha(0f);
         overlayVideo.setVisibility(View.VISIBLE);
         overlayVideo.setVideoURI(Uri.fromFile(file));
@@ -109,7 +146,11 @@ public final class TabletPlayer {
     }
 
     public CommandResult hideOverlay(int dissolveOutMs) {
-        if (overlayVideo == null) return CommandResult.completed("Overlay already hidden");
+        if (overlayVideo == null || overlayVideo.getVisibility() != View.VISIBLE) {
+            currentOverlay = "none";
+            return CommandResult.completed("Overlay already hidden");
+        }
+        overlayVideo.animate().cancel();
         overlayVideo.animate().alpha(0f).setDuration(Math.max(0, dissolveOutMs)).withEndAction(() -> {
             overlayVideo.stopPlayback();
             overlayVideo.setVisibility(View.GONE);
@@ -127,6 +168,10 @@ public final class TabletPlayer {
         liveVideo.setVisibility(View.VISIBLE);
         liveVideo.setVideoURI(Uri.parse(url));
         liveVideo.setOnPreparedListener(mp -> liveVideo.start());
+        liveVideo.setOnErrorListener((mp, what, extra) -> {
+            showStatus("Live error: " + what + "/" + extra);
+            return true;
+        });
         currentLive = url;
         hideBlackout();
         showStatus("Live: " + url);
@@ -144,6 +189,7 @@ public final class TabletPlayer {
     }
 
     public CommandResult blackout() {
+        blackoutVisible = true;
         blackoutView.setVisibility(View.VISIBLE);
         showStatus("BLACKOUT");
         return CommandResult.completed("Blackout visible");
@@ -166,11 +212,21 @@ public final class TabletPlayer {
         return CommandResult.completed("Identified");
     }
 
+    public void setStatusVisible(boolean visible) {
+        if (statusView != null) statusView.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
     public String observationSummary() {
-        return "main=" + currentMain + " overlay=" + currentOverlay + " live=" + currentLive;
+        return "main=" + currentMain
+                + " prepared=" + preparedMain
+                + " playing=" + mainPlaying
+                + " overlay=" + currentOverlay
+                + " live=" + currentLive
+                + " blackout=" + blackoutVisible;
     }
 
     private void hideBlackout() {
+        blackoutVisible = false;
         blackoutView.setVisibility(View.GONE);
     }
 
