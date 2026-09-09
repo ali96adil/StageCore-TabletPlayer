@@ -30,6 +30,20 @@ The app also has a bundled sample manifest, so `tablet_manifest.json` is optiona
 4. Tap the top-left corner five times quickly to show the Arabic settings/control panel.
 5. Tap `وضع العرض` or tap the top-left corner five times again to hide the settings/control panel.
 
+## Show lock behavior
+
+Open show mode and verify:
+
+- The screen stays awake while the app is open.
+- Android system bars/navigation are hidden with immersive sticky mode.
+- Pressing the Android Back button does not close the app during show mode.
+- Pressing Back while the settings panel is open hides the panel and returns to show mode.
+- The settings panel still opens only with five quick taps in the top-left corner.
+- The app can only be closed from the Arabic settings panel using `خروج من التطبيق`.
+- `قفل التطبيق` requests Android Lock Task / Screen Pinning mode when the device allows it.
+
+Important limitation: a normal Android app cannot completely disable the physical power button on every tablet unless Android kiosk/device-owner policy is configured. `KEEP_SCREEN_ON`, immersive mode, and optional Lock Task / Screen Pinning are the supported app-side protections.
+
 ## Arabic settings panel
 
 Open the panel with five quick top-left taps and verify:
@@ -99,7 +113,11 @@ Useful commands:
 - Tablet cue sequence can differ from StageCore cue sequence.
 - The manifest is scoped by `stagecore_project_id`, `runtime_snapshot_id`, and `tablet_manifest_id`.
 - Clean show mode has no persistent writing over the video.
+- Show mode keeps the screen awake and hides Android system UI.
+- Back does not exit the app during show mode.
+- App exit is only exposed inside the Arabic settings panel.
 - Portrait and landscape orientations are both available from settings.
 - Device ID, device name, server host/port, brightness, scale mode, orientation, and show mode preferences persist after restart.
 - Bonjour discovery fills server host/port when a matching StageCore service is found.
+- Main video, overlay video, live video, and blackout layers are all testable.
 - Legacy OSC remains a rehearsal/debug path, not the final StageCore authority path.
