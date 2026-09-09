@@ -14,10 +14,12 @@ import android.widget.VideoView;
 import com.stagecore.player.model.CommandResult;
 
 import java.io.File;
+import java.util.Locale;
 
 public final class TabletPlayer {
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private FrameLayout stageView;
     private VideoView mainVideo;
     private VideoView overlayVideo;
     private VideoView liveVideo;
@@ -31,12 +33,14 @@ public final class TabletPlayer {
     private boolean mainPlaying = false;
     private boolean blackoutVisible = false;
     private boolean statusPinned = false;
+    private String videoScaleMode = AppSettings.SCALE_FIT;
 
     public TabletPlayer(Context context) {
         this.context = context;
     }
 
     public void attachTo(FrameLayout stage) {
+        stageView = stage;
         mainVideo = new VideoView(context);
         overlayVideo = new VideoView(context);
         liveVideo = new VideoView(context);
@@ -58,13 +62,10 @@ public final class TabletPlayer {
         statusView.setText("StageCore Player ready");
         statusView.setVisibility(View.GONE);
 
-        FrameLayout.LayoutParams fill = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        );
-        stage.addView(mainVideo, fill);
-        stage.addView(overlayVideo, fill);
-        stage.addView(liveVideo, fill);
+        FrameLayout.LayoutParams fill = fillParams();
+        stage.addView(mainVideo, fillParams());
+        stage.addView(overlayVideo, fillParams());
+        stage.addView(liveVideo, fillParams());
         stage.addView(blackoutView, fill);
 
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
@@ -75,11 +76,29 @@ public final class TabletPlayer {
         stage.addView(statusView, statusParams);
     }
 
+    public void setVideoScaleMode(String mode) {
+        if (AppSettings.SCALE_FULL.equals(mode) || AppSettings.SCALE_FIT.equals(mode) || AppSettings.SCALE_CROP.equals(mode)) {
+            videoScaleMode = mode;
+        } else {
+            videoScaleMode = AppSettings.SCALE_FIT;
+        }
+        resetVideoLayout(mainVideo);
+        resetVideoLayout(overlayVideo);
+        resetVideoLayout(liveVideo);
+    }
+
+    public String videoScaleMode() {
+        return videoScaleMode;
+    }
+
     public CommandResult prepareMain(File file) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
         preparedMainFile = file;
         mainVideo.setVideoURI(Uri.fromFile(file));
-        mainVideo.setOnPreparedListener(mp -> mainVideo.seekTo(1));
+        mainVideo.setOnPreparedListener(mp -> {
+            applyVideoLayout(mainVideo, mp.getVideoWidth(), mp.getVideoHeight());
+            mainVideo.seekTo(1);
+        });
         preparedMain = file.getName();
         showStatus("Prepared main: " + preparedMain);
         return CommandResult.completed("Prepared main " + file.getName());
@@ -95,6 +114,7 @@ public final class TabletPlayer {
         hideBlackout();
         mainVideo.setVideoURI(Uri.fromFile(file));
         mainVideo.setOnPreparedListener(mp -> {
+            applyVideoLayout(mainVideo, mp.getVideoWidth(), mp.getVideoHeight());
             mp.setLooping(true);
             mainVideo.start();
             mainPlaying = true;
@@ -136,6 +156,7 @@ public final class TabletPlayer {
         overlayVideo.setVisibility(View.VISIBLE);
         overlayVideo.setVideoURI(Uri.fromFile(file));
         overlayVideo.setOnPreparedListener(mp -> {
+            applyVideoLayout(overlayVideo, mp.getVideoWidth(), mp.getVideoHeight());
             mp.setLooping(false);
             overlayVideo.start();
             overlayVideo.animate().alpha(1f).setDuration(Math.max(0, dissolveInMs)).start();
@@ -169,7 +190,10 @@ public final class TabletPlayer {
         liveVideo.setAlpha(1f);
         liveVideo.setVisibility(View.VISIBLE);
         liveVideo.setVideoURI(Uri.parse(url));
-        liveVideo.setOnPreparedListener(mp -> liveVideo.start());
+        liveVideo.setOnPreparedListener(mp -> {
+            applyVideoLayout(liveVideo, mp.getVideoWidth(), mp.getVideoHeight());
+            liveVideo.start();
+        });
         liveVideo.setOnErrorListener((mp, what, extra) -> {
             showStatus("Live error: " + what + "/" + extra);
             return true;
@@ -229,7 +253,8 @@ public final class TabletPlayer {
                 + " playing=" + mainPlaying
                 + " overlay=" + currentOverlay
                 + " live=" + currentLive
-                + " blackout=" + blackoutVisible;
+                + " blackout=" + blackoutVisible
+                + " scale=" + videoScaleMode;
     }
 
     private void hideBlackout() {
@@ -247,5 +272,43 @@ public final class TabletPlayer {
 
     private void showStatus(String message) {
         if (statusView != null) statusView.setText(message + "\n" + observationSummary());
+    }
+
+    private FrameLayout.LayoutParams fillParams() {
+        return new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+        );
+    }
+
+    private void resetVideoLayout(VideoView video) {
+        if (video == null) return;
+        video.setLayoutParams(fillParams());
+    }
+
+    private void applyVideoLayout(VideoView video, int videoWidth, int videoHeight) {
+        if (video == null || stageView == null) return;
+        int stageWidth = stageView.getWidth();
+        int stageHeight = stageView.getHeight();
+        if (stageWidth <= 0 || stageHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
+            resetVideoLayout(video);
+            return;
+        }
+        if (AppSettings.SCALE_FULL.equals(videoScaleMode)) {
+            resetVideoLayout(video);
+            return;
+        }
+
+        float scaleFit = Math.min(stageWidth / (float) videoWidth, stageHeight / (float) videoHeight);
+        float scaleCrop = Math.max(stageWidth / (float) videoWidth, stageHeight / (float) videoHeight);
+        float scale = AppSettings.SCALE_CROP.equals(videoScaleMode) ? scaleCrop : scaleFit;
+        int targetWidth = Math.max(1, Math.round(videoWidth * scale));
+        int targetHeight = Math.max(1, Math.round(videoHeight * scale));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(targetWidth, targetHeight, Gravity.CENTER);
+        video.setLayoutParams(params);
+        android.util.Log.i("StageCorePlayer", String.format(Locale.US,
+                "video scale mode=%s stage=%dx%d video=%dx%d target=%dx%d",
+                videoScaleMode, stageWidth, stageHeight, videoWidth, videoHeight, targetWidth, targetHeight));
     }
 }
