@@ -2,6 +2,7 @@ package com.stagecore.player;
 
 import com.stagecore.player.model.TabletManifest;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -39,7 +40,7 @@ public final class StageCoreClient {
     }
 
     public List<String> baselineCapabilities() {
-        return Arrays.asList(
+        ArrayList<String> capabilities = new ArrayList<>(Arrays.asList(
                 "tablet.media.prepare",
                 "tablet.media.select",
                 "tablet.media.play",
@@ -50,7 +51,9 @@ public final class StageCoreClient {
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
                 "tablet.media.live.hide"
-        );
+        ));
+        capabilities.addAll(StageCoreSettingsContract.settingsCapabilities());
+        return capabilities;
     }
 
     public String hello(TabletManifest manifest) {
@@ -61,6 +64,7 @@ public final class StageCoreClient {
                 + " project=" + manifest.stageCoreProjectId
                 + " snapshot=" + manifest.runtimeSnapshotId
                 + " manifest=" + manifest.tabletManifestId
+                + " controllable_settings=" + StageCoreSettingsContract.supportedSettingKeys()
                 + " capabilities=" + baselineCapabilities();
     }
 }
