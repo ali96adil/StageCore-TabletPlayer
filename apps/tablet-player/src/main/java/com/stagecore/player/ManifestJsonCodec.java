@@ -27,7 +27,10 @@ public final class ManifestJsonCodec {
         String showName = root.optString("show_name", root.optString("showName", "StageCore Show"));
 
         Map<String, MediaItemRef> media = parseMedia(root.getJSONObject("media"));
-        List<TabletCue> cues = parseCues(root.getJSONArray("cues"));
+        JSONArray cueArray = root.optJSONArray("tablet_cues");
+        if (cueArray == null) cueArray = root.optJSONArray("cues");
+        if (cueArray == null) throw new JSONException("Missing required field: tablet_cues");
+        List<TabletCue> cues = parseCues(cueArray);
         return new TabletManifest(schemaVersion, projectId, snapshotId, manifestId, showName, media, cues);
     }
 
