@@ -22,11 +22,19 @@ Required starter files:
 
 The app also has a bundled sample manifest, so `tablet_manifest.json` is optional for the first launch.
 
-## Manual launch test
+## Clean show-mode launch
 
 1. Install and open `StageCore Player`.
+2. The app should open to a clean black/show surface with no debug text covering the stage image.
+3. Rotate the tablet and confirm portrait and landscape are both allowed.
+4. Tap the top-left corner five times quickly to show the controls/debug panel.
+5. Tap `Show mode` or tap the top-left corner five times again to hide the controls/debug panel.
+
+## Manual launch test
+
+1. Open the hidden controls/debug panel with five quick taps in the top-left corner.
 2. Allow/manage storage access when Android asks for it.
-3. Confirm the screen shows:
+3. Confirm the debug panel shows:
    - stable tablet device id
    - active manifest source
    - media folder path
@@ -44,7 +52,9 @@ The app also has a bundled sample manifest, so `tablet_manifest.json` is optiona
 
 ## Show mode
 
-Tap `Show mode` to hide controls/status. Tap the top-left corner five times quickly to bring controls back.
+Controls and status text are hidden by default. Tap the top-left corner five times quickly to show or hide the debug panel.
+
+`Identify` may briefly show a status badge, then it should disappear again if the panel is not pinned open.
 
 ## Legacy OSC test
 
@@ -71,4 +81,6 @@ Useful commands:
 - Missing media reports a visible failure instead of playing the wrong file.
 - Tablet cue sequence can differ from StageCore cue sequence.
 - The manifest is scoped by `stagecore_project_id`, `runtime_snapshot_id`, and `tablet_manifest_id`.
+- Clean show mode has no persistent writing over the video.
+- Portrait and landscape orientations are both allowed.
 - Legacy OSC remains a rehearsal/debug path, not the final StageCore authority path.

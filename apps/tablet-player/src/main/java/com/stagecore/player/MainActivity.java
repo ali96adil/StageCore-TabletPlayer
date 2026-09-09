@@ -53,15 +53,16 @@ public final class MainActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
-        root.setOnTouchListener(this::handleCornerTap);
         player.attachTo(root);
         addControls(root);
+        addHotCorner(root);
         setContentView(root);
 
         loadExternalOrSample();
         oscServer = new LegacyOscServer(executor, player);
         oscServer.start(9000);
         renderInfo("StageCore Player ready. OSC listening on UDP 9000.");
+        setControlsVisible(false);
     }
 
     @Override
@@ -75,7 +76,6 @@ public final class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(18, 14, 18, 14);
         panel.setBackgroundColor(0x99000000);
-        controlsPanel = panel;
 
         info = new TextView(this);
         info.setTextColor(Color.WHITE);
@@ -112,6 +112,7 @@ public final class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(panel);
+        controlsPanel = scroll;
 
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -119,6 +120,14 @@ public final class MainActivity extends Activity {
                 Gravity.BOTTOM
         );
         root.addView(scroll, params);
+    }
+
+    private void addHotCorner(FrameLayout root) {
+        View hotCorner = new View(this);
+        hotCorner.setBackgroundColor(Color.TRANSPARENT);
+        hotCorner.setOnTouchListener(this::handleCornerTap);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(180, 180, Gravity.TOP | Gravity.START);
+        root.addView(hotCorner, params);
     }
 
     private LinearLayout row() {
@@ -158,7 +167,8 @@ public final class MainActivity extends Activity {
                 + "\nManifest source: " + manifestStore.activeSource()
                 + "\n" + stageCoreClient.hello(manifest)
                 + "\n" + mediaResolver.mediaFolderHelp()
-                + cues);
+                + cues
+                + "\n\nShow mode: controls are hidden during playback. Tap the top-left corner 5 times to show or hide controls.");
     }
 
     private String loadOrCreateDeviceId() {
@@ -176,17 +186,21 @@ public final class MainActivity extends Activity {
         player.setStatusVisible(visible);
     }
 
+    private boolean controlsVisible() {
+        return controlsPanel != null && controlsPanel.getVisibility() == View.VISIBLE;
+    }
+
     private boolean handleCornerTap(View view, MotionEvent event) {
-        if (event.getAction() != MotionEvent.ACTION_UP) return false;
-        if (event.getX() > 180 || event.getY() > 180) return false;
+        if (event.getAction() != MotionEvent.ACTION_UP) return true;
         long now = System.currentTimeMillis();
         if (now - lastTapMs > 1200) cornerTapCount = 0;
         lastTapMs = now;
         cornerTapCount++;
         if (cornerTapCount >= 5) {
             cornerTapCount = 0;
-            setControlsVisible(controlsPanel == null || controlsPanel.getVisibility() != View.VISIBLE);
-            return true;
+            boolean next = !controlsVisible();
+            setControlsVisible(next);
+            if (next) renderInfo("Controls opened.");
         }
         return true;
     }

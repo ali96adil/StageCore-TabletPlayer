@@ -30,6 +30,7 @@ public final class TabletPlayer {
     private String currentLive = "none";
     private boolean mainPlaying = false;
     private boolean blackoutVisible = false;
+    private boolean statusPinned = false;
 
     public TabletPlayer(Context context) {
         this.context = context;
@@ -55,6 +56,7 @@ public final class TabletPlayer {
         statusView.setBackgroundColor(0x66000000);
         statusView.setPadding(18, 12, 18, 12);
         statusView.setText("StageCore Player ready");
+        statusView.setVisibility(View.GONE);
 
         FrameLayout.LayoutParams fill = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -202,17 +204,22 @@ public final class TabletPlayer {
     }
 
     public CommandResult identify() {
+        if (statusView == null) return CommandResult.completed("Identified");
+        boolean wasPinned = statusPinned;
+        statusView.setVisibility(View.VISIBLE);
         showStatus("IDENTIFY - StageCore Player");
         statusView.setBackgroundColor(0xCCFFFFFF);
         statusView.setTextColor(Color.BLACK);
         mainHandler.postDelayed(() -> {
             statusView.setBackgroundColor(0x66000000);
             statusView.setTextColor(Color.WHITE);
-        }, 900);
+            if (!wasPinned && !statusPinned) statusView.setVisibility(View.GONE);
+        }, 1200);
         return CommandResult.completed("Identified");
     }
 
     public void setStatusVisible(boolean visible) {
+        statusPinned = visible;
         if (statusView != null) statusView.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
