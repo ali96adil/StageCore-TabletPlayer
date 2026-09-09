@@ -7,9 +7,9 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -31,7 +31,11 @@ public final class MainActivity extends Activity {
     private ManifestExecutor executor;
     private LegacyOscServer oscServer;
     private StageCoreClient stageCoreClient;
+    private MediaResolver mediaResolver;
     private TextView info;
+    private View controlsPanel;
+    private long lastTapMs = 0;
+    private int cornerTapCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,20 +46,22 @@ public final class MainActivity extends Activity {
 
         player = new TabletPlayer(this);
         manifestStore = new ManifestStore();
-        MediaResolver mediaResolver = new MediaResolver();
+        mediaResolver = new MediaResolver();
+        mediaResolver.ensureBaseDir();
         executor = new ManifestExecutor(manifestStore, mediaResolver, player);
         stageCoreClient = new StageCoreClient(loadOrCreateDeviceId());
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
+        root.setOnTouchListener(this::handleCornerTap);
         player.attachTo(root);
-        addControls(root, mediaResolver);
+        addControls(root);
         setContentView(root);
 
-        manifestStore.loadBundledSample();
+        loadExternalOrSample();
         oscServer = new LegacyOscServer(executor, player);
         oscServer.start(9000);
-        renderInfo("Loaded sample manifest. OSC listening on UDP 9000.");
+        renderInfo("StageCore Player ready. OSC listening on UDP 9000.");
     }
 
     @Override
@@ -64,11 +70,12 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    private void addControls(FrameLayout root, MediaResolver mediaResolver) {
+    private void addControls(FrameLayout root) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(18, 14, 18, 14);
         panel.setBackgroundColor(0x99000000);
+        controlsPanel = panel;
 
         info = new TextView(this);
         info.setTextColor(Color.WHITE);
@@ -76,6 +83,10 @@ public final class MainActivity extends Activity {
         panel.addView(info);
 
         LinearLayout row1 = row();
+        row1.addView(button("Reload manifest", v -> {
+            loadExternalOrSample();
+            renderInfo("Manifest reloaded.");
+        }));
         row1.addView(button("Load sample", v -> {
             manifestStore.loadBundledSample();
             renderInfo("Sample manifest loaded.");
@@ -87,15 +98,16 @@ public final class MainActivity extends Activity {
 
         LinearLayout row2 = row();
         row2.addView(button("GO cue 3 live", v -> showResult(executor.goCue(3))));
+        row2.addView(button("GO cue 4 blackout", v -> showResult(executor.goCue(4))));
         row2.addView(button("Hide live", v -> showResult(player.hideLive())));
-        row2.addView(button("Blackout", v -> showResult(player.blackout())));
         row2.addView(button("Clear blackout", v -> showResult(player.clearBlackout())));
         row2.addView(button("Identify", v -> showResult(player.identify())));
         panel.addView(row2);
 
         LinearLayout row3 = row();
         row3.addView(button("Storage settings", v -> openStorageSettings()));
-        row3.addView(button("Media folder", v -> renderInfo("Put files here: " + mediaResolver.baseDir().getAbsolutePath())));
+        row3.addView(button("Media folder", v -> renderInfo(mediaResolver.mediaFolderHelp())));
+        row3.addView(button("Show mode", v -> setControlsVisible(false)));
         panel.addView(row3);
 
         ScrollView scroll = new ScrollView(this);
@@ -124,6 +136,10 @@ public final class MainActivity extends Activity {
         return button;
     }
 
+    private void loadExternalOrSample() {
+        manifestStore.tryLoadFromDiskOrSample(mediaResolver.manifestFile());
+    }
+
     private void showResult(CommandResult result) {
         renderInfo(result.toString());
     }
@@ -134,12 +150,14 @@ public final class MainActivity extends Activity {
         for (TabletCue cue : manifest.cues) {
             cues.append("\nTablet Cue ").append(cue.tabletSequence)
                     .append(" -> StageCore Cue ").append(cue.sourceStageCoreSequence)
-                    .append(" | ").append(cue.name);
+                    .append(" | ").append(cue.name)
+                    .append(" | ").append(cue.tabletCueId);
         }
         info.setText(message
                 + "\nDevice: " + stageCoreClient.deviceId()
+                + "\nManifest source: " + manifestStore.activeSource()
                 + "\n" + stageCoreClient.hello(manifest)
-                + "\nMedia folder: " + new MediaResolver().baseDir().getAbsolutePath()
+                + "\n" + mediaResolver.mediaFolderHelp()
                 + cues);
     }
 
@@ -151,6 +169,26 @@ public final class MainActivity extends Activity {
             prefs.edit().putString("device_id", id).apply();
         }
         return id;
+    }
+
+    private void setControlsVisible(boolean visible) {
+        if (controlsPanel != null) controlsPanel.setVisibility(visible ? View.VISIBLE : View.GONE);
+        player.setStatusVisible(visible);
+    }
+
+    private boolean handleCornerTap(View view, MotionEvent event) {
+        if (event.getAction() != MotionEvent.ACTION_UP) return false;
+        if (event.getX() > 180 || event.getY() > 180) return false;
+        long now = System.currentTimeMillis();
+        if (now - lastTapMs > 1200) cornerTapCount = 0;
+        lastTapMs = now;
+        cornerTapCount++;
+        if (cornerTapCount >= 5) {
+            cornerTapCount = 0;
+            setControlsVisible(controlsPanel == null || controlsPanel.getVisibility() != View.VISIBLE);
+            return true;
+        }
+        return true;
     }
 
     private void openStorageSettings() {
