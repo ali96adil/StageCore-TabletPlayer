@@ -5,12 +5,38 @@ import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
+import org.json.JSONException;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public final class ManifestStore {
     private TabletManifest activeManifest;
+    private String activeSource = "none";
+
+    public TabletManifest loadFromDisk(File manifestFile) throws IOException, JSONException {
+        if (manifestFile == null) throw new IOException("Manifest file is null");
+        if (!manifestFile.exists() || !manifestFile.isFile()) {
+            throw new IOException("Manifest file not found: " + manifestFile.getAbsolutePath());
+        }
+        String json = new String(Files.readAllBytes(manifestFile.toPath()), StandardCharsets.UTF_8);
+        activeManifest = ManifestJsonCodec.parse(json);
+        activeSource = manifestFile.getAbsolutePath();
+        return activeManifest;
+    }
+
+    public TabletManifest tryLoadFromDiskOrSample(File manifestFile) {
+        try {
+            return loadFromDisk(manifestFile);
+        } catch (Exception ignored) {
+            return loadBundledSample();
+        }
+    }
 
     public TabletManifest loadBundledSample() {
         Map<String, MediaItemRef> media = new LinkedHashMap<>();
@@ -30,6 +56,10 @@ public final class ManifestStore {
                 "tablet_cue_003", 3, "stagecore_cue_022", 22, "Show live camera",
                 Arrays.asList(new TabletAction("action_live_01", "live.show", "live.camera.01", 0, 0))
         );
+        TabletCue cue4 = new TabletCue(
+                "tablet_cue_004", 4, "stagecore_cue_024", 24, "Blackout",
+                Arrays.asList(new TabletAction("action_blackout_01", "blackout", null, 0, 0))
+        );
 
         activeManifest = new TabletManifest(
                 "tablet_manifest/1",
@@ -38,13 +68,18 @@ public final class ManifestStore {
                 "tablet_manifest_demo_001",
                 "العميان",
                 media,
-                Arrays.asList(cue1, cue2, cue3)
+                Arrays.asList(cue1, cue2, cue3, cue4)
         );
+        activeSource = "bundled sample";
         return activeManifest;
     }
 
     public TabletManifest activeManifest() {
         if (activeManifest == null) return loadBundledSample();
         return activeManifest;
+    }
+
+    public String activeSource() {
+        return activeSource;
     }
 }
