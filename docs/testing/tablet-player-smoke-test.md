@@ -46,6 +46,32 @@ Open the panel with five quick top-left taps and verify:
 - `فحص الصلاحيات` reports storage access state.
 - The interface text is Arabic-first while code/API names remain English.
 
+## StageCore settings-control foundation
+
+The app must advertise that StageCore will be able to control production-critical tablet settings remotely after final pairing is implemented.
+
+Verify the debug/hello output includes controllable settings and capabilities for:
+
+```text
+tablet.settings.read
+tablet.settings.apply
+tablet.settings.reset
+tablet.settings.device_id.set
+tablet.settings.device_name.set
+tablet.settings.server.set
+tablet.settings.auto_discover.set
+tablet.settings.brightness.set
+tablet.settings.video_scale.set
+tablet.settings.orientation.set
+tablet.settings.show_mode.set
+tablet.settings.show_lock.set
+tablet.permissions.check
+tablet.media.scan
+tablet.media.prepare_folder
+```
+
+StageCore should later use these capabilities to push settings, request a file scan, prepare `/sdcard/TheatreVideos/`, and reject show start when files are missing.
+
 ## Manual launch test
 
 1. Open the hidden settings/control panel with five quick taps in the top-left corner.
@@ -102,4 +128,5 @@ Useful commands:
 - Portrait and landscape orientations are both available from settings.
 - Device ID, device name, server host/port, brightness, scale mode, orientation, and show mode preferences persist after restart.
 - Bonjour discovery fills server host/port when a matching StageCore service is found.
+- The app advertises StageCore-controllable settings and media-scan capabilities.
 - Legacy OSC remains a rehearsal/debug path, not the final StageCore authority path.
