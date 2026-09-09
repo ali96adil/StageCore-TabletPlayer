@@ -26,6 +26,10 @@ public final class AppSettings {
     public String videoScaleMode;
     public String orientationMode;
     public boolean showModeOnLaunch;
+    public boolean showLockEnabled;
+    public boolean heartbeatEnabled;
+    public int heartbeatPort;
+    public int heartbeatIntervalSeconds;
 
     private AppSettings() {}
 
@@ -41,6 +45,10 @@ public final class AppSettings {
         settings.videoScaleMode = normalizeScale(prefs.getString("video_scale_mode", SCALE_FIT));
         settings.orientationMode = normalizeOrientation(prefs.getString("orientation_mode", ORIENTATION_AUTO));
         settings.showModeOnLaunch = prefs.getBoolean("show_mode_on_launch", true);
+        settings.showLockEnabled = prefs.getBoolean("show_lock_enabled", true);
+        settings.heartbeatEnabled = prefs.getBoolean("heartbeat_enabled", true);
+        settings.heartbeatPort = clamp(prefs.getInt("heartbeat_port", 9100), 1, 65535);
+        settings.heartbeatIntervalSeconds = clamp(prefs.getInt("heartbeat_interval_seconds", 10), 3, 60);
         settings.save(context);
         return settings;
     }
@@ -53,6 +61,8 @@ public final class AppSettings {
         brightnessPercent = clamp(brightnessPercent, 5, 100);
         videoScaleMode = normalizeScale(videoScaleMode);
         orientationMode = normalizeOrientation(orientationMode);
+        heartbeatPort = clamp(heartbeatPort, 1, 65535);
+        heartbeatIntervalSeconds = clamp(heartbeatIntervalSeconds, 3, 60);
 
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString("device_id", deviceId)
@@ -64,12 +74,22 @@ public final class AppSettings {
                 .putString("video_scale_mode", videoScaleMode)
                 .putString("orientation_mode", orientationMode)
                 .putBoolean("show_mode_on_launch", showModeOnLaunch)
+                .putBoolean("show_lock_enabled", showLockEnabled)
+                .putBoolean("heartbeat_enabled", heartbeatEnabled)
+                .putInt("heartbeat_port", heartbeatPort)
+                .putInt("heartbeat_interval_seconds", heartbeatIntervalSeconds)
                 .apply();
     }
 
     public String serverLabel() {
         if (serverHost == null || serverHost.trim().isEmpty()) return "غير محدد";
         return serverHost + ":" + serverPort;
+    }
+
+    public String heartbeatLabel() {
+        if (!heartbeatEnabled) return "متوقف";
+        if (serverHost == null || serverHost.trim().isEmpty()) return "بانتظار السيرفر";
+        return serverHost + ":" + heartbeatPort + " كل " + heartbeatIntervalSeconds + " ثواني";
     }
 
     private static String nonBlank(String value, String fallback) {
