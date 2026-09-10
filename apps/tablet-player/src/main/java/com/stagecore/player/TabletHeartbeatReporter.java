@@ -8,6 +8,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Build;
+import android.os.Environment;
 
 import com.stagecore.player.model.TabletManifest;
 
@@ -100,7 +101,7 @@ public final class TabletHeartbeatReporter {
                 + json("project_id", manifest == null ? "unknown" : manifest.stageCoreProjectId) + ","
                 + json("runtime_snapshot_id", manifest == null ? "unknown" : manifest.runtimeSnapshotId) + ","
                 + json("tablet_manifest_id", manifest == null ? "unknown" : manifest.tabletManifestId) + ","
-                + json("permission_state", safeSnapshot("permission_state", provider::storagePermissionState)) + ","
+                + json("permission_state", storagePermissionState()) + ","
                 + json("media_scan", safeSnapshot("media_scan", provider::mediaScanSummary)) + ","
                 + json("player_state", safeSnapshot("player_state", provider::playerState)) + ","
                 + json("last_error", safeSnapshot("last_error", provider::lastError))
@@ -134,6 +135,11 @@ public final class TabletHeartbeatReporter {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         return powerManager != null && powerManager.isPowerSaveMode();
+    }
+
+    private String storagePermissionState() {
+        boolean allFiles = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
+        return allFiles ? "مفعّل" : "غير مفعّل";
     }
 
     private String safeSnapshot(String field, SnapshotValue value) {
