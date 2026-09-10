@@ -7,8 +7,8 @@ import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
-import android.provider.Settings;
 import android.os.Build;
+import android.os.Environment;
 
 import com.stagecore.player.model.TabletManifest;
 
@@ -16,7 +16,6 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 
 /**
  * Lightweight UDP heartbeat for rehearsal/status monitoring.
@@ -87,7 +86,7 @@ public final class TabletHeartbeatReporter {
                 + json("device_type", StageCoreClient.DEVICE_TYPE) + ","
                 + json("device_id", settings.deviceId) + ","
                 + json("device_name", settings.deviceName) + ","
-                + json("app_mode", provider.appMode()) + ","
+                + json("app_mode", safeSnapshot("app_mode", provider::appMode)) + ","
                 + json("server", settings.serverLabel()) + ","
                 + json("heartbeat_interval_seconds", String.valueOf(settings.heartbeatIntervalSeconds), false) + ","
                 + json("battery_percent", String.valueOf(battery.percent), false) + ","
@@ -98,14 +97,14 @@ public final class TabletHeartbeatReporter {
                 + json("video_scale_mode", settings.videoScaleMode) + ","
                 + json("show_mode_on_launch", String.valueOf(settings.showModeOnLaunch), false) + ","
                 + json("show_lock_enabled", String.valueOf(settings.showLockEnabled), false) + ","
-                + json("manifest_source", provider.manifestSource()) + ","
+                + json("manifest_source", safeSnapshot("manifest_source", provider::manifestSource)) + ","
                 + json("project_id", manifest == null ? "unknown" : manifest.stageCoreProjectId) + ","
                 + json("runtime_snapshot_id", manifest == null ? "unknown" : manifest.runtimeSnapshotId) + ","
                 + json("tablet_manifest_id", manifest == null ? "unknown" : manifest.tabletManifestId) + ","
-                + json("permission_state", provider.storagePermissionState()) + ","
-                + json("media_scan", provider.mediaScanSummary()) + ","
-                + json("player_state", provider.playerState()) + ","
-                + json("last_error", provider.lastError())
+                + json("permission_state", storagePermissionState()) + ","
+                + json("media_scan", safeSnapshot("media_scan", provider::mediaScanSummary)) + ","
+                + json("player_state", safeSnapshot("player_state", provider::playerState)) + ","
+                + json("last_error", safeSnapshot("last_error", provider::lastError))
                 + "}";
     }
 
@@ -136,6 +135,25 @@ public final class TabletHeartbeatReporter {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         return powerManager != null && powerManager.isPowerSaveMode();
+    }
+
+    private String storagePermissionState() {
+        boolean allFiles = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
+        return allFiles ? "مفعّل" : "غير مفعّل";
+    }
+
+    private String safeSnapshot(String field, SnapshotValue value) {
+        try {
+            String result = value.get();
+            return result == null ? "" : result;
+        } catch (Throwable throwable) {
+            android.util.Log.w("TabletHeartbeat", "snapshot field failed: " + field + " — " + throwable.getClass().getSimpleName());
+            return "unavailable";
+        }
+    }
+
+    private interface SnapshotValue {
+        String get();
     }
 
     private static String json(String key, String value) {
