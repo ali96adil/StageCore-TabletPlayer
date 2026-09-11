@@ -45,15 +45,13 @@ public final class TabletPlayer {
 
     public void attachTo(FrameLayout stage) {
         stageView = stage;
+        stageView.setBackgroundColor(Color.BLACK);
         mainVideo = new TextureSlot("main");
         overlayVideo = new TextureSlot("overlay");
         liveVideo = new TextureSlot("live");
         blackoutView = new View(context);
         statusView = new TextView(context);
 
-        mainVideo.view.setBackgroundColor(Color.BLACK);
-        overlayVideo.view.setBackgroundColor(Color.TRANSPARENT);
-        liveVideo.view.setBackgroundColor(Color.TRANSPARENT);
         overlayVideo.view.setVisibility(View.GONE);
         liveVideo.view.setVisibility(View.GONE);
 
