@@ -2,28 +2,31 @@ package com.stagecore.player;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.SurfaceTexture;
+import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
-import android.view.SurfaceView;
+import android.view.Surface;
+import android.view.TextureView;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
-import android.widget.VideoView;
 
 import com.stagecore.player.model.CommandResult;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Locale;
 
 public final class TabletPlayer {
     private final Context context;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private FrameLayout stageView;
-    private VideoView mainVideo;
-    private VideoView overlayVideo;
-    private VideoView liveVideo;
+    private TextureSlot mainVideo;
+    private TextureSlot overlayVideo;
+    private TextureSlot liveVideo;
     private View blackoutView;
     private TextView statusView;
     private File preparedMainFile;
@@ -35,12 +38,6 @@ public final class TabletPlayer {
     private boolean blackoutVisible = false;
     private boolean statusPinned = false;
     private String videoScaleMode = AppSettings.SCALE_FIT;
-    private int mainVideoWidth = 0;
-    private int mainVideoHeight = 0;
-    private int overlayVideoWidth = 0;
-    private int overlayVideoHeight = 0;
-    private int liveVideoWidth = 0;
-    private int liveVideoHeight = 0;
 
     public TabletPlayer(Context context) {
         this.context = context;
@@ -48,18 +45,17 @@ public final class TabletPlayer {
 
     public void attachTo(FrameLayout stage) {
         stageView = stage;
-        mainVideo = new VideoView(context);
-        overlayVideo = new VideoView(context);
-        liveVideo = new VideoView(context);
+        mainVideo = new TextureSlot("main");
+        overlayVideo = new TextureSlot("overlay");
+        liveVideo = new TextureSlot("live");
         blackoutView = new View(context);
         statusView = new TextView(context);
 
-        mainVideo.setBackgroundColor(Color.BLACK);
-        overlayVideo.setBackgroundColor(Color.TRANSPARENT);
-        liveVideo.setBackgroundColor(Color.TRANSPARENT);
-        configureSurfaceOrder();
-        overlayVideo.setVisibility(View.GONE);
-        liveVideo.setVisibility(View.GONE);
+        mainVideo.view.setBackgroundColor(Color.BLACK);
+        overlayVideo.view.setBackgroundColor(Color.TRANSPARENT);
+        liveVideo.view.setBackgroundColor(Color.TRANSPARENT);
+        overlayVideo.view.setVisibility(View.GONE);
+        liveVideo.view.setVisibility(View.GONE);
 
         blackoutView.setBackgroundColor(Color.BLACK);
         blackoutView.setVisibility(View.GONE);
@@ -70,11 +66,10 @@ public final class TabletPlayer {
         statusView.setText("StageCore Player ready");
         statusView.setVisibility(View.GONE);
 
-        FrameLayout.LayoutParams fill = fillParams();
-        stage.addView(mainVideo, fillParams());
-        stage.addView(overlayVideo, fillParams());
-        stage.addView(liveVideo, fillParams());
-        stage.addView(blackoutView, fill);
+        stage.addView(mainVideo.view, fillParams());
+        stage.addView(overlayVideo.view, fillParams());
+        stage.addView(liveVideo.view, fillParams());
+        stage.addView(blackoutView, fillParams());
 
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -100,16 +95,10 @@ public final class TabletPlayer {
     public CommandResult prepareMain(File file) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
         preparedMainFile = file;
-        mainVideo.clearAnimation();
-        mainVideo.setVisibility(View.VISIBLE);
-        mainVideo.setVideoURI(Uri.fromFile(file));
-        mainVideo.setOnPreparedListener(mp -> {
-            mainVideoWidth = mp.getVideoWidth();
-            mainVideoHeight = mp.getVideoHeight();
-            applyVideoLayout(mainVideo, mainVideoWidth, mainVideoHeight);
-            mainVideo.seekTo(1);
-        });
         preparedMain = file.getName();
+        mainVideo.view.clearAnimation();
+        mainVideo.view.setVisibility(View.VISIBLE);
+        mainVideo.prepare(Uri.fromFile(file), true, false, 1, null);
         showStatus("Prepared main: " + preparedMain);
         return CommandResult.completed("Prepared main " + file.getName());
     }
@@ -123,29 +112,17 @@ public final class TabletPlayer {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
         hideBlackout();
         hideLive();
-        mainVideo.clearAnimation();
-        mainVideo.setAlpha(1f);
-        mainVideo.setVisibility(View.VISIBLE);
-        mainVideo.setVideoURI(Uri.fromFile(file));
-        mainVideo.setOnPreparedListener(mp -> {
-            mainVideoWidth = mp.getVideoWidth();
-            mainVideoHeight = mp.getVideoHeight();
-            applyVideoLayout(mainVideo, mainVideoWidth, mainVideoHeight);
-            mp.setLooping(true);
-            mainHandler.post(() -> {
-                mainVideo.start();
-                mainPlaying = true;
-                showStatus("Playing main: " + currentMain);
-            });
-        });
-        mainVideo.setOnErrorListener((mp, what, extra) -> {
-            mainPlaying = false;
-            showStatus("Main error: " + what + "/" + extra);
-            return true;
-        });
+        mainVideo.view.clearAnimation();
+        mainVideo.view.setAlpha(1f);
+        mainVideo.view.setVisibility(View.VISIBLE);
         currentMain = file.getName();
         preparedMainFile = file;
         preparedMain = file.getName();
+        mainPlaying = false;
+        mainVideo.prepare(Uri.fromFile(file), true, true, 0, () -> {
+            mainPlaying = true;
+            showStatus("Playing main: " + currentMain);
+        });
         showStatus("Loading main: " + currentMain);
         return CommandResult.completed("Playing main " + file.getName());
     }
@@ -163,112 +140,73 @@ public final class TabletPlayer {
     }
 
     public CommandResult stopMain() {
-        if (mainVideo != null) {
-            mainVideo.stopPlayback();
-        }
+        if (mainVideo != null) mainVideo.stopAndReset();
         mainPlaying = false;
         currentMain = "none";
         preparedMain = "none";
         preparedMainFile = null;
-        mainVideoWidth = 0;
-        mainVideoHeight = 0;
         showStatus("Main stopped");
         return CommandResult.completed("Main stopped");
     }
 
     public CommandResult playOverlay(File file, int dissolveInMs, int dissolveOutMs) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
-        overlayVideo.animate().cancel();
-        overlayVideo.setAlpha(dissolveInMs <= 0 ? 1f : 0f);
-        overlayVideo.setVisibility(View.VISIBLE);
-        overlayVideo.bringToFront();
+        overlayVideo.view.animate().cancel();
+        overlayVideo.view.setAlpha(dissolveInMs <= 0 ? 1f : 0f);
+        overlayVideo.view.setVisibility(View.VISIBLE);
+        overlayVideo.view.bringToFront();
         keepControlsOnTop();
-        overlayVideo.setVideoURI(Uri.fromFile(file));
-        overlayVideo.setOnPreparedListener(mp -> {
-            overlayVideoWidth = mp.getVideoWidth();
-            overlayVideoHeight = mp.getVideoHeight();
-            applyVideoLayout(overlayVideo, overlayVideoWidth, overlayVideoHeight);
-            mp.setLooping(false);
-            overlayVideo.start();
-            if (dissolveInMs > 0) {
-                overlayVideo.animate().alpha(1f).setDuration(dissolveInMs).start();
-            }
-        });
-        overlayVideo.setOnErrorListener((mp, what, extra) -> {
-            currentOverlay = "none";
-            overlayVideo.setVisibility(View.GONE);
-            showStatus("Overlay error: " + what + "/" + extra);
-            return true;
-        });
-        overlayVideo.setOnCompletionListener(mp -> hideOverlay(dissolveOutMs));
         currentOverlay = file.getName();
         hideBlackout();
+        overlayVideo.prepare(Uri.fromFile(file), false, true, 0, () -> {
+            if (dissolveInMs > 0) overlayVideo.view.animate().alpha(1f).setDuration(dissolveInMs).start();
+        }, () -> hideOverlay(dissolveOutMs));
         showStatus("Overlay: " + currentOverlay);
         return CommandResult.completed("Playing overlay " + file.getName());
     }
 
     public CommandResult hideOverlay(int dissolveOutMs) {
-        if (overlayVideo == null || overlayVideo.getVisibility() != View.VISIBLE) {
+        if (overlayVideo == null || overlayVideo.view.getVisibility() != View.VISIBLE) {
             currentOverlay = "none";
             return CommandResult.completed("Overlay already hidden");
         }
-        overlayVideo.animate().cancel();
+        overlayVideo.view.animate().cancel();
         if (dissolveOutMs <= 0) {
-            overlayVideo.stopPlayback();
-            overlayVideo.setVisibility(View.GONE);
+            overlayVideo.stopAndReset();
+            overlayVideo.view.setVisibility(View.GONE);
             currentOverlay = "none";
-            overlayVideoWidth = 0;
-            overlayVideoHeight = 0;
             showStatus("Overlay hidden");
             return CommandResult.completed("Overlay hidden");
         }
-        overlayVideo.animate().alpha(0f).setDuration(dissolveOutMs).withEndAction(() -> {
-            overlayVideo.stopPlayback();
-            overlayVideo.setVisibility(View.GONE);
+        overlayVideo.view.animate().alpha(0f).setDuration(dissolveOutMs).withEndAction(() -> {
+            overlayVideo.stopAndReset();
+            overlayVideo.view.setVisibility(View.GONE);
             currentOverlay = "none";
-            overlayVideoWidth = 0;
-            overlayVideoHeight = 0;
             showStatus("Overlay hidden");
         }).start();
         return CommandResult.completed("Overlay hide requested");
     }
 
     public CommandResult showLive(String url) {
-        if (url == null || url.trim().isEmpty()) {
-            return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
-        }
+        if (url == null || url.trim().isEmpty()) return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
         hideBlackout();
         hideOverlay(0);
-        liveVideo.setAlpha(1f);
-        liveVideo.setVisibility(View.VISIBLE);
-        liveVideo.bringToFront();
+        liveVideo.view.setAlpha(1f);
+        liveVideo.view.setVisibility(View.VISIBLE);
+        liveVideo.view.bringToFront();
         keepControlsOnTop();
-        liveVideo.setVideoURI(Uri.parse(url));
-        liveVideo.setOnPreparedListener(mp -> {
-            liveVideoWidth = mp.getVideoWidth();
-            liveVideoHeight = mp.getVideoHeight();
-            applyVideoLayout(liveVideo, liveVideoWidth, liveVideoHeight);
-            liveVideo.start();
-        });
-        liveVideo.setOnErrorListener((mp, what, extra) -> {
-            currentLive = "none";
-            liveVideo.setVisibility(View.GONE);
-            showStatus("Live error: " + what + "/" + extra);
-            return true;
-        });
         currentLive = url;
+        liveVideo.prepare(Uri.parse(url), false, true, 0, null);
         showStatus("Live: " + url);
         return CommandResult.completed("Live visible");
     }
 
     public CommandResult hideLive() {
         if (liveVideo != null) {
-            liveVideo.stopPlayback();
-            liveVideo.setVisibility(View.GONE);
+            liveVideo.stopAndReset();
+            liveVideo.view.setVisibility(View.GONE);
         }
         currentLive = "none";
-        liveVideoWidth = 0;
-        liveVideoHeight = 0;
         showStatus("Live hidden");
         return CommandResult.completed("Live hidden");
     }
@@ -319,18 +257,6 @@ public final class TabletPlayer {
                 + " scale=" + videoScaleMode;
     }
 
-    private void configureSurfaceOrder() {
-        configureSurface(mainVideo, false);
-        configureSurface(overlayVideo, true);
-        configureSurface(liveVideo, true);
-    }
-
-    private void configureSurface(VideoView video, boolean mediaOverlay) {
-        if (video instanceof SurfaceView) {
-            ((SurfaceView) video).setZOrderMediaOverlay(mediaOverlay);
-        }
-    }
-
     private void keepControlsOnTop() {
         if (blackoutView != null && blackoutView.getVisibility() == View.VISIBLE) blackoutView.bringToFront();
         if (statusView != null) statusView.bringToFront();
@@ -362,35 +288,21 @@ public final class TabletPlayer {
     }
 
     private void applyKnownLayouts() {
-        applyOrReset(mainVideo, mainVideoWidth, mainVideoHeight);
-        applyOrReset(overlayVideo, overlayVideoWidth, overlayVideoHeight);
-        applyOrReset(liveVideo, liveVideoWidth, liveVideoHeight);
+        if (mainVideo != null) mainVideo.applyLayout();
+        if (overlayVideo != null) overlayVideo.applyLayout();
+        if (liveVideo != null) liveVideo.applyLayout();
     }
 
-    private void applyOrReset(VideoView video, int videoWidth, int videoHeight) {
-        if (video == null) return;
-        if (videoWidth > 0 && videoHeight > 0) {
-            applyVideoLayout(video, videoWidth, videoHeight);
-        } else {
-            resetVideoLayout(video);
-        }
-    }
-
-    private void resetVideoLayout(VideoView video) {
-        if (video == null) return;
-        video.setLayoutParams(fillParams());
-    }
-
-    private void applyVideoLayout(VideoView video, int videoWidth, int videoHeight) {
+    private void applyVideoLayout(TextureView video, int videoWidth, int videoHeight) {
         if (video == null || stageView == null) return;
         int stageWidth = stageView.getWidth();
         int stageHeight = stageView.getHeight();
         if (stageWidth <= 0 || stageHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
-            resetVideoLayout(video);
+            video.setLayoutParams(fillParams());
             return;
         }
         if (AppSettings.SCALE_FULL.equals(videoScaleMode)) {
-            resetVideoLayout(video);
+            video.setLayoutParams(fillParams());
             return;
         }
 
@@ -402,7 +314,175 @@ public final class TabletPlayer {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(targetWidth, targetHeight, Gravity.CENTER);
         video.setLayoutParams(params);
         android.util.Log.i("StageCorePlayer", String.format(Locale.US,
-                "video scale mode=%s stage=%dx%d video=%dx%d target=%dx%d",
+                "texture scale mode=%s stage=%dx%d video=%dx%d target=%dx%d",
                 videoScaleMode, stageWidth, stageHeight, videoWidth, videoHeight, targetWidth, targetHeight));
+    }
+
+    private final class TextureSlot implements TextureView.SurfaceTextureListener {
+        final String name;
+        final TextureView view;
+        private Surface surface;
+        private MediaPlayer player;
+        private Uri pendingUri;
+        private boolean pendingLoop;
+        private boolean pendingStart;
+        private int pendingSeekMs;
+        private Runnable pendingOnStarted;
+        private Runnable pendingOnCompletion;
+        private int videoWidth;
+        private int videoHeight;
+
+        TextureSlot(String name) {
+            this.name = name;
+            this.view = new TextureView(context);
+            this.view.setSurfaceTextureListener(this);
+        }
+
+        void prepare(Uri uri, boolean loop, boolean startWhenReady, int seekMs, Runnable onStarted) {
+            prepare(uri, loop, startWhenReady, seekMs, onStarted, null);
+        }
+
+        void prepare(Uri uri, boolean loop, boolean startWhenReady, int seekMs, Runnable onStarted, Runnable onCompletion) {
+            pendingUri = uri;
+            pendingLoop = loop;
+            pendingStart = startWhenReady;
+            pendingSeekMs = seekMs;
+            pendingOnStarted = onStarted;
+            pendingOnCompletion = onCompletion;
+            if (surface != null) startPending();
+        }
+
+        void pause() {
+            try {
+                if (player != null && player.isPlaying()) player.pause();
+            } catch (IllegalStateException ignored) {
+                android.util.Log.w("StageCorePlayer", name + " pause ignored invalid state");
+            }
+        }
+
+        boolean isPlaying() {
+            try {
+                return player != null && player.isPlaying();
+            } catch (IllegalStateException ignored) {
+                return false;
+            }
+        }
+
+        void stopAndReset() {
+            pendingUri = null;
+            pendingOnStarted = null;
+            pendingOnCompletion = null;
+            videoWidth = 0;
+            videoHeight = 0;
+            releasePlayer();
+        }
+
+        void applyLayout() {
+            if (videoWidth > 0 && videoHeight > 0) applyVideoLayout(view, videoWidth, videoHeight);
+            else view.setLayoutParams(fillParams());
+        }
+
+        @Override
+        public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
+            surface = new Surface(surfaceTexture);
+            if (pendingUri != null) startPending();
+        }
+
+        @Override
+        public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
+            applyLayout();
+        }
+
+        @Override
+        public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
+            releasePlayer();
+            if (surface != null) {
+                surface.release();
+                surface = null;
+            }
+            return true;
+        }
+
+        @Override
+        public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
+            // No-op.
+        }
+
+        private void startPending() {
+            if (surface == null || pendingUri == null) return;
+            Uri uri = pendingUri;
+            boolean loop = pendingLoop;
+            boolean startWhenReady = pendingStart;
+            int seekMs = pendingSeekMs;
+            Runnable onStarted = pendingOnStarted;
+            Runnable onCompletion = pendingOnCompletion;
+            releasePlayer();
+            MediaPlayer next = new MediaPlayer();
+            player = next;
+            try {
+                next.setSurface(surface);
+                next.setLooping(loop);
+                next.setDataSource(context, uri);
+                next.setOnPreparedListener(mp -> {
+                    videoWidth = mp.getVideoWidth();
+                    videoHeight = mp.getVideoHeight();
+                    applyVideoLayout(view, videoWidth, videoHeight);
+                    if (seekMs > 0) mp.seekTo(seekMs);
+                    if (startWhenReady) {
+                        mp.start();
+                        if (onStarted != null) mainHandler.post(onStarted);
+                    }
+                    android.util.Log.i("StageCorePlayer", name + " prepared uri=" + uri);
+                });
+                next.setOnCompletionListener(mp -> {
+                    if (onCompletion != null) mainHandler.post(onCompletion);
+                });
+                next.setOnErrorListener((mp, what, extra) -> {
+                    handleSlotError(name, what, extra);
+                    return true;
+                });
+                next.prepareAsync();
+            } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+                handleSlotException(name, e);
+            }
+        }
+
+        private void releasePlayer() {
+            MediaPlayer old = player;
+            player = null;
+            if (old != null) {
+                try {
+                    old.setOnPreparedListener(null);
+                    old.setOnCompletionListener(null);
+                    old.setOnErrorListener(null);
+                    old.reset();
+                    old.release();
+                } catch (IllegalStateException ignored) {
+                    old.release();
+                }
+            }
+        }
+    }
+
+    private void handleSlotError(String name, int what, int extra) {
+        if ("main".equals(name)) mainPlaying = false;
+        if ("overlay".equals(name)) {
+            currentOverlay = "none";
+            overlayVideo.view.setVisibility(View.GONE);
+        }
+        if ("live".equals(name)) {
+            currentLive = "none";
+            liveVideo.view.setVisibility(View.GONE);
+        }
+        showStatus(name + " error: " + what + "/" + extra);
+        android.util.Log.e("StageCorePlayer", name + " error what=" + what + " extra=" + extra);
+    }
+
+    private void handleSlotException(String name, Exception error) {
+        if ("main".equals(name)) mainPlaying = false;
+        if ("overlay".equals(name)) currentOverlay = "none";
+        if ("live".equals(name)) currentLive = "none";
+        showStatus(name + " exception: " + error.getClass().getSimpleName());
+        android.util.Log.e("StageCorePlayer", name + " exception", error);
     }
 }
