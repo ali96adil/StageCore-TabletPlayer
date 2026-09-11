@@ -50,6 +50,8 @@ public final class MainActivity extends Activity {
     private TextView brightnessLabel;
     private TextView readinessBadge;
     private View controlsPanel;
+    private LinearLayout advancedDebugPanel;
+    private CheckBox advancedDebugCheck;
     private EditText deviceIdInput;
     private EditText deviceNameInput;
     private EditText serverHostInput;
@@ -109,7 +111,7 @@ public final class MainActivity extends Activity {
         oscServer = new LegacyOscServer(executor, player);
         oscServer.start(9000);
         refreshSettingsFields();
-        showActionResult("Startup", "جاهز للعرض. OSC يعمل على UDP 9000.", "READY ✅", false);
+        showActionResult("Startup", "جاهز للعرض. OSC debug يعمل على UDP 9000.", "READY ✅", false);
         setControlsVisible(!appSettings.showModeOnLaunch);
         if (appSettings.autoDiscover) startDiscovery(false);
         heartbeatReporter.start();
@@ -168,7 +170,8 @@ public final class MainActivity extends Activity {
         panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         panel.setTextDirection(View.TEXT_DIRECTION_RTL);
 
-        panel.addView(title("إعدادات StageCore Player"));
+        panel.addView(title("StageCore Player V1"));
+        panel.addView(help("تابلت عرض احترافي: التشغيل والكيوات من StageCore، وهذا المكان فقط للإعداد والفحص السريع."));
         readinessBadge = badge("جاهزية العرض: جاري الفحص...");
         panel.addView(readinessBadge);
 
@@ -180,38 +183,25 @@ public final class MainActivity extends Activity {
         actionResult.setBackgroundColor(0x5533AA55);
         panel.addView(actionResult);
 
-        panel.addView(help("الخمس نقرات أعلى اليسار تفتح/تخفي الإعدادات. النتائج الطويلة صارت بالأسفل حتى الشاشة ما تقفز."));
-
-        panel.addView(section("اختبار سريع"));
+        panel.addView(section("فحص العرض"));
         panel.addView(rowButtons(
+                button("Pre-show Check", v -> showActionResult("Pre-show Check", preShowCheckSummary(), preShowCheckSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true)),
                 button("Reload + Scan", v -> reloadManifestAndScan()),
-                button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true)),
-                button("Pre-show Check", v -> showActionResult("Pre-show Check", preShowCheckSummary(), preShowCheckSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true))
-        ));
-        panel.addView(rowButtons(
-                button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
-                button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
-                button("Overlay 2", v -> showResult("Overlay 2", executor.goCue(2)))
-        ));
-        panel.addView(rowButtons(
-                button("Sample Live Cue 3", v -> showResult("Sample Live Cue 3", executor.goCue(3))),
-                button("Blackout 4", v -> showResult("Blackout 4", executor.goCue(4))),
-                button("Clear", v -> showResult("Clear", player.clearBlackout()))
+                button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true))
         ));
         panel.addView(rowButtons(
                 button("Identify", v -> showResult("Identify", player.identify())),
-                button("وضع العرض", v -> enterShowModeNow()),
+                button("دخول وضع العرض", v -> enterShowModeNow()),
                 button("إغلاق التطبيق", v -> finish())
         ));
 
-        panel.addView(section("اختبار Cue يدوي"));
-        cueNumberInput = editText();
-        cueNumberInput.setText("1");
-        panel.addView(field("رقم Cue", cueNumberInput));
+        panel.addView(section("تحكم سريع آمن"));
         panel.addView(rowButtons(
-                button("Prepare Cue", v -> showResult("Prepare Cue " + selectedCueNumber(), executor.prepareCue(selectedCueNumber()))),
-                button("GO Cue", v -> showResult("GO Cue " + selectedCueNumber(), executor.goCue(selectedCueNumber())))
+                button("Clear Overlay", v -> showResult("Clear Overlay", player.hideOverlay(0))),
+                button("Hide Live", v -> showResult("Hide Live", player.hideLive())),
+                button("Clear Blackout", v -> showResult("Clear Blackout", player.clearBlackout()))
         ));
+        panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
         liveUrlInput = editText();
@@ -221,7 +211,6 @@ public final class MainActivity extends Activity {
                 button("Test Live URL", v -> testLiveUrl()),
                 button("Hide Live", v -> showResult("Hide Live", player.hideLive()))
         ));
-        panel.addView(help("ملاحظة: Sample Live Cue 3 يستخدم رابط المنفست. Test Live URL يستخدم الرابط المكتوب هنا."));
 
         panel.addView(section("الصورة والسطوع"));
         brightnessLabel = help("السطوع: " + appSettings.brightnessPercent + "%");
@@ -248,9 +237,9 @@ public final class MainActivity extends Activity {
         });
         panel.addView(brightness);
         panel.addView(rowButtons(
-                button("Full / ملء", v -> setScale(AppSettings.SCALE_FULL)),
-                button("Fit / احتواء", v -> setScale(AppSettings.SCALE_FIT)),
-                button("Crop / قص", v -> setScale(AppSettings.SCALE_CROP))
+                button("Full", v -> setScale(AppSettings.SCALE_FULL)),
+                button("Fit", v -> setScale(AppSettings.SCALE_FIT)),
+                button("Crop", v -> setScale(AppSettings.SCALE_CROP))
         ));
         panel.addView(rowButtons(
                 button("اتجاه تلقائي", v -> setOrientation(AppSettings.ORIENTATION_AUTO)),
@@ -267,6 +256,7 @@ public final class MainActivity extends Activity {
                 button("حفظ الإعدادات", v -> saveSettingsFromFields()),
                 button("توليد ID جديد", v -> regenerateDeviceId())
         ));
+        panel.addView(help("تبديل الدور يتم من StageCore: التابلت يعلن device_id، وStageCore يربطه بالدور المناسب."));
 
         panel.addView(section("سيرفر StageCore"));
         serverHostInput = editText();
@@ -314,13 +304,38 @@ public final class MainActivity extends Activity {
                 button("فتح صلاحيات التخزين", v -> openStorageSettings())
         ));
 
-        panel.addView(section("النسخة والتحديث"));
+        panel.addView(section("النسخة"));
         panel.addView(help(buildInfoSummary()));
-        panel.addView(help("التحديث داخل التطبيق ممكن لاحقاً إذا وفرنا رابط APK ثابت وموقّع. حالياً الزر يفتح صفحة التحديثات/الأرتيفاكت حتى ننزلها يدويًا بأمان."));
         panel.addView(rowButtons(
-                button("فتح صفحة التحديثات", v -> openUpdatePage()),
                 button("عرض معلومات النسخة", v -> showActionResult("Build Info", buildInfoSummary(), "READY ✅", true))
         ));
+
+        panel.addView(section("Advanced / Debug"));
+        advancedDebugCheck = checkBox("إظهار أزرار الاختبار المتقدمة", false);
+        panel.addView(advancedDebugCheck);
+        advancedDebugPanel = new LinearLayout(this);
+        advancedDebugPanel.setOrientation(LinearLayout.VERTICAL);
+        advancedDebugPanel.setVisibility(View.GONE);
+        advancedDebugCheck.setOnCheckedChangeListener((buttonView, isChecked) -> advancedDebugPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE));
+        advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore."));
+        advancedDebugPanel.addView(rowButtons(
+                button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
+                button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
+                button("Overlay 2", v -> showResult("Overlay 2", executor.goCue(2)))
+        ));
+        advancedDebugPanel.addView(rowButtons(
+                button("Sample Live Cue 3", v -> showResult("Sample Live Cue 3", executor.goCue(3))),
+                button("Blackout 4", v -> showResult("Blackout 4", executor.goCue(4))),
+                button("Clear", v -> showResult("Clear", player.clearBlackout()))
+        ));
+        cueNumberInput = editText();
+        cueNumberInput.setText("1");
+        advancedDebugPanel.addView(field("رقم Cue للاختبار اليدوي", cueNumberInput));
+        advancedDebugPanel.addView(rowButtons(
+                button("Prepare Cue", v -> showResult("Prepare Cue " + selectedCueNumber(), executor.prepareCue(selectedCueNumber()))),
+                button("GO Cue", v -> showResult("GO Cue " + selectedCueNumber(), executor.goCue(selectedCueNumber())))
+        ));
+        panel.addView(advancedDebugPanel);
 
         panel.addView(section("تفاصيل آخر نتيجة"));
         resultDetails = text(13f);
@@ -822,17 +837,6 @@ public final class MainActivity extends Activity {
                 + " (" + BuildConfig.VERSION_CODE + ")"
                 + "\nBuild: " + BuildConfig.BUILD_LABEL
                 + "\nPackage: " + getPackageName();
-    }
-
-    private void openUpdatePage() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ali96adil/StageCore-TabletPlayer/actions"));
-            startActivity(intent);
-            showActionResult("Updates", "تم فتح صفحة GitHub Actions للتحديثات. التحديث الداخلي الكامل يحتاج endpoint ثابت للـAPK وتوقيع release.", "CHECK ⚠️", true);
-        } catch (Exception error) {
-            lastError = "Cannot open update page";
-            showActionResult("Updates", "ما كدرت أفتح صفحة التحديثات من هذا الجهاز.", "FAILED ❌", true);
-        }
     }
 
     private static String value(EditText editText, String fallback) {
