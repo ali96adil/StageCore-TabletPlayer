@@ -10,9 +10,9 @@ android {
         applicationId = "com.stagecore.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0.0-rc1"
-        buildConfigField("String", "BUILD_LABEL", "\"V1 RC1 production polish\"")
+        versionCode = 101
+        versionName = "1.0.0-rc2"
+        buildConfigField("String", "BUILD_LABEL", "\"V1 RC2 stable owner credit — © 2026 Ali Adil — ali96adil@gmail.com — All rights reserved\"")
     }
 
     buildFeatures {
