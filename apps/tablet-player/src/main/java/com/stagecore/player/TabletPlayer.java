@@ -220,6 +220,7 @@ public final class TabletPlayer {
 
     public CommandResult clearBlackout() {
         hideBlackout();
+        keepControlsOnTop();
         showStatus("Blackout cleared");
         return CommandResult.completed("Blackout cleared");
     }
@@ -232,10 +233,12 @@ public final class TabletPlayer {
         showStatus("IDENTIFY - StageCore Player");
         statusView.setBackgroundColor(0xCCFFFFFF);
         statusView.setTextColor(Color.BLACK);
+        keepControlsOnTop();
         mainHandler.postDelayed(() -> {
             statusView.setBackgroundColor(0x66000000);
             statusView.setTextColor(Color.WHITE);
             if (!wasPinned && !statusPinned) statusView.setVisibility(View.GONE);
+            keepControlsOnTop();
         }, 1200);
         return CommandResult.completed("Identified");
     }
@@ -243,6 +246,7 @@ public final class TabletPlayer {
     public void setStatusVisible(boolean visible) {
         statusPinned = visible;
         if (statusView != null) statusView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        keepControlsOnTop();
     }
 
     public String observationSummary() {
@@ -256,8 +260,23 @@ public final class TabletPlayer {
     }
 
     private void keepControlsOnTop() {
-        if (blackoutView != null && blackoutView.getVisibility() == View.VISIBLE) blackoutView.bringToFront();
-        if (statusView != null) statusView.bringToFront();
+        if (stageView == null) return;
+
+        java.util.ArrayList<View> operatorOverlays = new java.util.ArrayList<>();
+        int childCount = stageView.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            View child = stageView.getChildAt(i);
+            if (child != mainVideo.view
+                    && child != overlayVideo.view
+                    && child != liveVideo.view
+                    && child != blackoutView) {
+                operatorOverlays.add(child);
+            }
+        }
+
+        for (View child : operatorOverlays) {
+            child.bringToFront();
+        }
     }
 
     private void hideBlackout() {
