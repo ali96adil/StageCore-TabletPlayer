@@ -43,7 +43,9 @@ public final class MainActivity extends Activity {
     private MediaResolver mediaResolver;
     private AppSettings appSettings;
 
-    private TextView info;
+    private TextView statusHeader;
+    private TextView actionResult;
+    private TextView resultDetails;
     private TextView discoveryInfo;
     private TextView brightnessLabel;
     private TextView readinessBadge;
@@ -57,20 +59,23 @@ public final class MainActivity extends Activity {
     private CheckBox autoDiscoverCheck;
     private CheckBox showModeCheck;
     private CheckBox showLockCheck;
+    private CheckBox keepAwakeCheck;
     private CheckBox heartbeatCheck;
 
     private long lastTapMs = 0;
     private int cornerTapCount = 0;
     private String lastError = "";
+    private String lastAction = "جاهز";
+    private String lastActionState = "READY ✅";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         appSettings = AppSettings.load(this);
+        applyAwakeFlag();
         applyOrientation(appSettings.orientationMode);
         applyScreenBrightness(appSettings.brightnessPercent);
 
@@ -86,7 +91,7 @@ public final class MainActivity extends Activity {
             @Override public TabletManifest manifest() { return manifestStore.activeManifest(); }
             @Override public String manifestSource() { return manifestStore.activeSource(); }
             @Override public String mediaScanSummary() { return mediaResolver.scanSummary(manifestStore.activeManifest()).replace('\n', ';'); }
-            @Override public String storagePermissionState() { return storagePermissionState(); }
+            @Override public String storagePermissionState() { return MainActivity.this.storagePermissionState(); }
             @Override public String playerState() { return player.observationSummary(); }
             @Override public String appMode() { return controlsVisible() ? "SETTINGS" : "SHOW"; }
             @Override public String lastError() { return lastError; }
@@ -104,7 +109,7 @@ public final class MainActivity extends Activity {
         oscServer = new LegacyOscServer(executor, player);
         oscServer.start(9000);
         refreshSettingsFields();
-        renderInfo("جاهز للعرض. تحكم OSC يعمل على UDP 9000.");
+        showActionResult("Startup", "جاهز للعرض. OSC يعمل على UDP 9000.", "READY ✅", false);
         setControlsVisible(!appSettings.showModeOnLaunch);
         if (appSettings.autoDiscover) startDiscovery(false);
         heartbeatReporter.start();
@@ -114,6 +119,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        applyAwakeFlag();
         applyShowLockSurface();
         if (heartbeatReporter != null) heartbeatReporter.pokeSoon();
     }
@@ -163,18 +169,100 @@ public final class MainActivity extends Activity {
         panel.setTextDirection(View.TEXT_DIRECTION_RTL);
 
         panel.addView(title("إعدادات StageCore Player"));
-        panel.addView(help("وضع العرض يبقى نظيف ومقفول. افتح/اخفِ الإعدادات بخمس ضغطات سريعة أعلى اليسار."));
         readinessBadge = badge("جاهزية العرض: جاري الفحص...");
         panel.addView(readinessBadge);
 
-        info = text(13f);
-        panel.addView(info);
+        statusHeader = badge("جاهز");
+        statusHeader.setBackgroundColor(0x55222222);
+        panel.addView(statusHeader);
+
+        actionResult = badge("آخر أمر: جاهز");
+        actionResult.setBackgroundColor(0x5533AA55);
+        panel.addView(actionResult);
+
+        panel.addView(help("الخمس نقرات أعلى اليسار تفتح/تخفي الإعدادات. النتائج الطويلة صارت بالأسفل حتى الشاشة ما تقفز."));
+
+        panel.addView(section("اختبار سريع"));
+        panel.addView(rowButtons(
+                button("Reload + Scan", v -> reloadManifestAndScan()),
+                button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true)),
+                button("Pre-show Check", v -> showActionResult("Pre-show Check", preShowCheckSummary(), preShowCheckSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true))
+        ));
+        panel.addView(rowButtons(
+                button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
+                button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
+                button("Overlay 2", v -> showResult("Overlay 2", executor.goCue(2)))
+        ));
+        panel.addView(rowButtons(
+                button("Sample Live Cue 3", v -> showResult("Sample Live Cue 3", executor.goCue(3))),
+                button("Blackout 4", v -> showResult("Blackout 4", executor.goCue(4))),
+                button("Clear", v -> showResult("Clear", player.clearBlackout()))
+        ));
+        panel.addView(rowButtons(
+                button("Identify", v -> showResult("Identify", player.identify())),
+                button("وضع العرض", v -> enterShowModeNow()),
+                button("إغلاق التطبيق", v -> finish())
+        ));
+
+        panel.addView(section("اختبار Cue يدوي"));
+        cueNumberInput = editText();
+        cueNumberInput.setText("1");
+        panel.addView(field("رقم Cue", cueNumberInput));
+        panel.addView(rowButtons(
+                button("Prepare Cue", v -> showResult("Prepare Cue " + selectedCueNumber(), executor.prepareCue(selectedCueNumber()))),
+                button("GO Cue", v -> showResult("GO Cue " + selectedCueNumber(), executor.goCue(selectedCueNumber())))
+        ));
+
+        panel.addView(section("اختبار Live يدوي"));
+        liveUrlInput = editText();
+        liveUrlInput.setText("http://192.168.3.80:81/stream");
+        panel.addView(field("Live URL", liveUrlInput));
+        panel.addView(rowButtons(
+                button("Test Live URL", v -> testLiveUrl()),
+                button("Hide Live", v -> showResult("Hide Live", player.hideLive()))
+        ));
+        panel.addView(help("ملاحظة: Sample Live Cue 3 يستخدم رابط المنفست. Test Live URL يستخدم الرابط المكتوب هنا."));
+
+        panel.addView(section("الصورة والسطوع"));
+        brightnessLabel = help("السطوع: " + appSettings.brightnessPercent + "%");
+        panel.addView(brightnessLabel);
+        SeekBar brightness = new SeekBar(this);
+        brightness.setMax(100);
+        brightness.setProgress(appSettings.brightnessPercent);
+        brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = Math.max(5, progress);
+                if (fromUser) {
+                    appSettings.brightnessPercent = value;
+                    applyScreenBrightness(value);
+                    brightnessLabel.setText("السطوع: " + value + "%");
+                    updateStatusHeader();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                appSettings.save(MainActivity.this);
+                showActionResult("Brightness", "تم ضبط السطوع: " + appSettings.brightnessPercent + "%", "READY ✅", false);
+                pokeHeartbeat();
+            }
+        });
+        panel.addView(brightness);
+        panel.addView(rowButtons(
+                button("Full / ملء", v -> setScale(AppSettings.SCALE_FULL)),
+                button("Fit / احتواء", v -> setScale(AppSettings.SCALE_FIT)),
+                button("Crop / قص", v -> setScale(AppSettings.SCALE_CROP))
+        ));
+        panel.addView(rowButtons(
+                button("اتجاه تلقائي", v -> setOrientation(AppSettings.ORIENTATION_AUTO)),
+                button("عمودي", v -> setOrientation(AppSettings.ORIENTATION_PORTRAIT)),
+                button("أفقي", v -> setOrientation(AppSettings.ORIENTATION_LANDSCAPE))
+        ));
 
         panel.addView(section("هوية التابلت"));
         deviceIdInput = editText();
         deviceNameInput = editText();
         panel.addView(field("ID التابلت", deviceIdInput));
-        panel.addView(field("اسم الجهاز", deviceNameInput));
+        panel.addView(field("اسم الجهاز / اسم الممثل", deviceNameInput));
         panel.addView(rowButtons(
                 button("حفظ الإعدادات", v -> saveSettingsFromFields()),
                 button("توليد ID جديد", v -> regenerateDeviceId())
@@ -197,96 +285,48 @@ public final class MainActivity extends Activity {
         panel.addView(section("الأمان والحالة"));
         showModeCheck = checkBox("فتح التطبيق بوضع العرض النظيف", appSettings.showModeOnLaunch);
         showLockCheck = checkBox("قفل العرض Show Lock", appSettings.showLockEnabled);
+        keepAwakeCheck = checkBox("إبقاء الشاشة شغالة دائماً", appSettings.keepScreenAwake);
         heartbeatCheck = checkBox("إرسال حالة التابلت للسيرفر", appSettings.heartbeatEnabled);
         panel.addView(showModeCheck);
         panel.addView(showLockCheck);
+        panel.addView(keepAwakeCheck);
         panel.addView(heartbeatCheck);
         panel.addView(help("Heartbeat: " + appSettings.heartbeatLabel()));
         panel.addView(rowButtons(
-                button("فحص قبل العرض", v -> renderInfo(preShowCheckSummary())),
-                button("إرسال حالة الآن", v -> pokeHeartbeat()),
+                button("إرسال حالة الآن", v -> {
+                    pokeHeartbeat();
+                    showActionResult("Heartbeat", "تم طلب إرسال حالة الآن.", "READY ✅", false);
+                }),
                 button("دخول وضع العرض الآن", v -> enterShowModeNow())
-        ));
-
-        panel.addView(section("الصورة والسطوع"));
-        brightnessLabel = help("السطوع: " + appSettings.brightnessPercent + "%");
-        panel.addView(brightnessLabel);
-        SeekBar brightness = new SeekBar(this);
-        brightness.setMax(100);
-        brightness.setProgress(appSettings.brightnessPercent);
-        brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int value = Math.max(5, progress);
-                if (fromUser) {
-                    appSettings.brightnessPercent = value;
-                    applyScreenBrightness(value);
-                    brightnessLabel.setText("السطوع: " + value + "%");
-                }
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) { appSettings.save(MainActivity.this); pokeHeartbeat(); }
-        });
-        panel.addView(brightness);
-        panel.addView(rowButtons(
-                button("Full / ملء", v -> setScale(AppSettings.SCALE_FULL)),
-                button("Fit / احتواء", v -> setScale(AppSettings.SCALE_FIT)),
-                button("Crop / قص", v -> setScale(AppSettings.SCALE_CROP))
-        ));
-        panel.addView(rowButtons(
-                button("اتجاه تلقائي", v -> setOrientation(AppSettings.ORIENTATION_AUTO)),
-                button("عمودي", v -> setOrientation(AppSettings.ORIENTATION_PORTRAIT)),
-                button("أفقي", v -> setOrientation(AppSettings.ORIENTATION_LANDSCAPE))
         ));
 
         panel.addView(section("ملفات الفيديو والصلاحيات"));
         panel.addView(help(mediaResolver.mediaFolderHelpArabic()));
-        panel.addView(help("ترتيب الكيو مستقل عن أسماء الملفات: ممكن Cue 1 يشغل main_02 إذا المنفست يطلب هذا."));
+        panel.addView(help("المسار المطلوب: /sdcard/TheatreVideos — المنفست يحدد أي Cue يشغل أي ملف."));
         panel.addView(rowButtons(
-                button("تجهيز المجلد", v -> renderInfo(mediaResolver.prepareFolderSummary())),
+                button("تجهيز المجلد", v -> showActionResult("Prepare Folder", mediaResolver.prepareFolderSummary(), "READY ✅", true)),
                 button("فتح مجلد الفيديوات", v -> openMediaFolder()),
-                button("فحص الملفات", v -> renderInfo(compactMediaScanSummary()))
+                button("فحص الملفات", v -> showActionResult("Media Scan", compactMediaScanSummary(), compactMediaScanSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true))
         ));
         panel.addView(rowButtons(
                 button("إعادة تحميل + فحص", v -> reloadManifestAndScan()),
-                button("فحص الصلاحيات", v -> renderInfo(storagePermissionSummary())),
+                button("فحص الصلاحيات", v -> showActionResult("Storage Permission", storagePermissionSummary(), storagePermissionState().equals("مفعّل") ? "READY ✅" : "CHECK ⚠️", true)),
                 button("فتح صلاحيات التخزين", v -> openStorageSettings())
         ));
+
+        panel.addView(section("النسخة والتحديث"));
+        panel.addView(help(buildInfoSummary()));
+        panel.addView(help("التحديث داخل التطبيق ممكن لاحقاً إذا وفرنا رابط APK ثابت وموقّع. حالياً الزر يفتح صفحة التحديثات/الأرتيفاكت حتى ننزلها يدويًا بأمان."));
         panel.addView(rowButtons(
-                button("عرض Cue Preview", v -> renderInfo(cuePreviewSummary()))
+                button("فتح صفحة التحديثات", v -> openUpdatePage()),
+                button("عرض معلومات النسخة", v -> showActionResult("Build Info", buildInfoSummary(), "READY ✅", true))
         ));
 
-        panel.addView(section("اختبار Cue يدوي"));
-        cueNumberInput = editText();
-        cueNumberInput.setText("1");
-        panel.addView(field("رقم Cue", cueNumberInput));
-        panel.addView(rowButtons(
-                button("Prepare Cue", v -> showResult(executor.prepareCue(selectedCueNumber()))),
-                button("GO Cue", v -> showResult(executor.goCue(selectedCueNumber())))
-        ));
-
-        panel.addView(section("اختبار Live يدوي"));
-        liveUrlInput = editText();
-        liveUrlInput.setText("http://192.168.3.80:81/stream");
-        panel.addView(field("Live URL", liveUrlInput));
-        panel.addView(rowButtons(
-                button("Test Live", v -> testLiveUrl()),
-                button("Hide Live", v -> showResult(player.hideLive()))
-        ));
-
-        panel.addView(section("اختبار سريع"));
-        panel.addView(rowButtons(
-                button("Prepare 1", v -> showResult(executor.prepareCue(1))),
-                button("GO 1", v -> showResult(executor.goCue(1))),
-                button("Overlay 2", v -> showResult(executor.goCue(2)))
-        ));
-        panel.addView(rowButtons(
-                button("Live 3", v -> showResult(executor.goCue(3))),
-                button("Blackout 4", v -> showResult(executor.goCue(4))),
-                button("Clear", v -> showResult(player.clearBlackout())),
-                button("Identify", v -> showResult(player.identify())),
-                button("وضع العرض", v -> setControlsVisible(false)),
-                button("إغلاق التطبيق", v -> finish())
-        ));
+        panel.addView(section("تفاصيل آخر نتيجة"));
+        resultDetails = text(13f);
+        resultDetails.setPadding(12, 10, 12, 10);
+        resultDetails.setBackgroundColor(0x44222222);
+        panel.addView(resultDetails);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(panel);
@@ -390,6 +430,7 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(label);
         button.setAllCaps(false);
+        button.setMinHeight(44);
         button.setOnClickListener(listener);
         return button;
     }
@@ -402,9 +443,11 @@ public final class MainActivity extends Activity {
         if (autoDiscoverCheck != null) autoDiscoverCheck.setChecked(appSettings.autoDiscover);
         if (showModeCheck != null) showModeCheck.setChecked(appSettings.showModeOnLaunch);
         if (showLockCheck != null) showLockCheck.setChecked(appSettings.showLockEnabled);
+        if (keepAwakeCheck != null) keepAwakeCheck.setChecked(appSettings.keepScreenAwake);
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
         updateReadinessBadge();
+        updateStatusHeader();
     }
 
     private void saveSettingsFromFields() {
@@ -415,14 +458,16 @@ public final class MainActivity extends Activity {
         appSettings.autoDiscover = autoDiscoverCheck != null && autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck != null && showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck != null && showLockCheck.isChecked();
+        appSettings.keepScreenAwake = keepAwakeCheck == null || keepAwakeCheck.isChecked();
         appSettings.heartbeatEnabled = heartbeatCheck != null && heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        applyAwakeFlag();
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
         refreshSettingsFields();
-        renderInfo("تم حفظ الإعدادات.");
+        showActionResult("Save Settings", "تم حفظ الإعدادات.", "READY ✅", false);
         applyShowLockSurface();
         pokeHeartbeat();
     }
@@ -432,7 +477,7 @@ public final class MainActivity extends Activity {
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         refreshSettingsFields();
-        renderInfo("تم توليد ID جديد لهذا التابلت.");
+        showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
         pokeHeartbeat();
     }
 
@@ -440,7 +485,7 @@ public final class MainActivity extends Activity {
         appSettings.videoScaleMode = scale;
         appSettings.save(this);
         player.setVideoScaleMode(scale);
-        renderInfo("تم تغيير حجم الفيديو إلى: " + scale);
+        showActionResult("Scale", "تم تغيير حجم الفيديو إلى: " + scale, "READY ✅", false);
         pokeHeartbeat();
     }
 
@@ -448,13 +493,14 @@ public final class MainActivity extends Activity {
         appSettings.orientationMode = orientation;
         appSettings.save(this);
         applyOrientation(orientation);
-        renderInfo("تم تغيير اتجاه العرض إلى: " + orientation);
+        showActionResult("Orientation", "تم تغيير اتجاه العرض إلى: " + orientation, "READY ✅", false);
         pokeHeartbeat();
     }
 
     private void startDiscovery(boolean visibleFeedback) {
         saveSettingsFromFieldsWithoutRender();
         if (visibleFeedback && discoveryInfo != null) discoveryInfo.setText("جاري البحث عن StageCore داخل الشبكة...");
+        showActionResult("Discovery", "جاري البحث عن StageCore داخل الشبكة...", "Running...", false);
         discovery.start(new StageCoreDiscovery.Callback() {
             @Override
             public void onFound(String name, String host, int port, String serviceType) {
@@ -464,7 +510,7 @@ public final class MainActivity extends Activity {
                 refreshSettingsFields();
                 String message = "تم العثور على StageCore: " + name + " — " + appSettings.serverLabel() + " — " + serviceType;
                 if (discoveryInfo != null) discoveryInfo.setText(message);
-                renderInfo(message);
+                showActionResult("Discovery", message, "READY ✅", true);
                 pokeHeartbeat();
             }
 
@@ -479,17 +525,13 @@ public final class MainActivity extends Activity {
     private void stopDiscovery() {
         if (discovery != null) discovery.stop();
         if (discoveryInfo != null) discoveryInfo.setText("تم إيقاف البحث التلقائي.");
-    }
-
-    private void reloadManifest() {
-        loadExternalOrSample();
-        renderInfo("تمت إعادة تحميل المنفست.");
-        pokeHeartbeat();
+        showActionResult("Discovery", "تم إيقاف البحث التلقائي.", "READY ✅", false);
     }
 
     private void reloadManifestAndScan() {
         loadExternalOrSample();
-        renderInfo("تمت إعادة تحميل المنفست.\n\n" + compactMediaScanSummary() + "\n\n" + cuePreviewSummary());
+        String details = "تمت إعادة تحميل المنفست.\n\n" + compactMediaScanSummary() + "\n\n" + cuePreviewSummary();
+        showActionResult("Reload + Scan", details, details.contains("النواقص: 0") ? "READY ✅" : "CHECK ⚠️", true);
         pokeHeartbeat();
     }
 
@@ -497,35 +539,59 @@ public final class MainActivity extends Activity {
         manifestStore.tryLoadFromDiskOrSample(mediaResolver.manifestFile());
     }
 
-    private void showResult(CommandResult result) {
+    private void showResult(String actionName, CommandResult result) {
         String message = result.toString();
-        if (message.contains("FAILED") || message.contains("MEDIA_NOT_FOUND") || message.contains("ERROR")) lastError = message;
-        renderInfo(message);
+        String severity = classifyResult(message);
+        if (severity.contains("FAILED") || severity.contains("CHECK")) lastError = message;
+        showActionResult(actionName, message, severity, false);
         pokeHeartbeat();
     }
 
-    private void renderInfo(String message) {
-        if (info == null) return;
-        TabletManifest manifest = manifestStore.activeManifest();
-        StringBuilder cues = new StringBuilder();
-        for (TabletCue cue : manifest.cues) {
-            cues.append("\nكيو تابلت ").append(cue.tabletSequence)
-                    .append(" = StageCore Cue ").append(cue.sourceStageCoreSequence)
-                    .append(" | ").append(cue.name);
+    private String classifyResult(String message) {
+        if (message == null) return "CHECK ⚠️";
+        String upper = message.toUpperCase(java.util.Locale.US);
+        if (upper.contains("FAILED") || upper.contains("ERROR") || upper.contains("MISSING") || upper.contains("NOT_FOUND")) return "FAILED ❌";
+        if (upper.contains("REJECTED") || upper.contains("CHECK")) return "CHECK ⚠️";
+        return "READY ✅";
+    }
+
+    private void showActionResult(String actionName, String details, String severity, boolean keepFullDetails) {
+        lastAction = actionName;
+        lastActionState = severity;
+        updateStatusHeader();
+        if (actionResult != null) {
+            actionResult.setText("آخر أمر: " + actionName + " — " + severity + "\n" + firstLine(details));
+            actionResult.setBackgroundColor(severity.contains("FAILED") ? 0x55AA3333 : severity.contains("CHECK") ? 0x55AA8833 : 0x5533AA55);
         }
-        info.setText(message
-                + "\nالجهاز: " + stageCoreClient.deviceName()
-                + "\nID: " + stageCoreClient.deviceId()
+        if (resultDetails != null) {
+            resultDetails.setText((keepFullDetails ? details : compactDetails(details)) + "\n\n" + buildInfoSummary());
+        }
+        updateReadinessBadge();
+    }
+
+    private String firstLine(String value) {
+        if (value == null || value.trim().isEmpty()) return "";
+        String clean = value.trim();
+        int nl = clean.indexOf('\n');
+        return nl >= 0 ? clean.substring(0, nl) : clean;
+    }
+
+    private String compactDetails(String value) {
+        if (value == null) return "";
+        String clean = value.trim();
+        if (clean.length() <= 900) return clean;
+        return clean.substring(0, 900) + "\n...\nافتح Cue Preview أو Pre-show Check للتفاصيل الكاملة.";
+    }
+
+    private void updateStatusHeader() {
+        if (statusHeader == null || appSettings == null || stageCoreClient == null) return;
+        statusHeader.setText("الجهاز: " + stageCoreClient.deviceName()
                 + "\nالسيرفر: " + appSettings.serverLabel()
-                + "\nHeartbeat: " + appSettings.heartbeatLabel()
-                + "\nمصدر المنفست: " + manifestStore.activeSource()
-                + "\nالمشروع: " + manifest.showName
+                + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
                 + " | السطوع: " + appSettings.brightnessPercent + "%"
-                + "\nقفل العرض: " + (appSettings.showLockEnabled ? "مفعل" : "متوقف")
-                + cues);
-        updateReadinessBadge();
+                + "\nآخر أمر: " + lastAction + " — " + lastActionState);
     }
 
     private void setControlsVisible(boolean visible) {
@@ -533,7 +599,7 @@ public final class MainActivity extends Activity {
         player.setStatusVisible(false);
         if (visible) {
             refreshSettingsFields();
-            renderInfo("لوحة الإعدادات مفتوحة.");
+            showActionResult("Settings", "لوحة الإعدادات مفتوحة.", "READY ✅", false);
         }
         applyShowLockSurface();
         pokeHeartbeat();
@@ -557,6 +623,7 @@ public final class MainActivity extends Activity {
     }
 
     private void openStorageSettings() {
+        showActionResult("Storage Settings", "فتح صفحة صلاحيات التخزين للنظام.", "READY ✅", false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
             intent.setData(Uri.parse("package:" + getPackageName()));
@@ -575,16 +642,16 @@ public final class MainActivity extends Activity {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         try {
             startActivity(intent);
-            renderInfo("تم طلب فتح مدير الملفات.\nالمجلد المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath());
+            showActionResult("Open Folder", "تم طلب فتح مدير الملفات.\nالمجلد المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath(), "READY ✅", true);
         } catch (Exception ignored) {
             Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
             picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             try {
                 startActivity(picker);
-                renderInfo("اختر مجلد TheatreVideos يدويًا.\nالمسار المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath());
+                showActionResult("Open Folder", "اختر مجلد TheatreVideos يدويًا.\nالمسار المطلوب:\n" + mediaResolver.baseDir().getAbsolutePath(), "CHECK ⚠️", true);
             } catch (Exception failed) {
                 lastError = "File manager unavailable";
-                renderInfo("ما كدرت أفتح مدير الملفات تلقائيًا.\nافتح File Manager يدويًا وروح إلى:\n" + mediaResolver.baseDir().getAbsolutePath());
+                showActionResult("Open Folder", "ما كدرت أفتح مدير الملفات تلقائيًا.\nافتح File Manager يدويًا وروح إلى:\n" + mediaResolver.baseDir().getAbsolutePath(), "FAILED ❌", true);
             }
         }
     }
@@ -610,6 +677,7 @@ public final class MainActivity extends Activity {
                 + "\nالصلاحيات: " + storagePermissionState()
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
+                + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
                 + "\n\n" + scan
                 + "\n\n" + cuePreviewSummary();
     }
@@ -626,15 +694,20 @@ public final class MainActivity extends Activity {
         TabletManifest manifest = manifestStore.activeManifest();
         if (manifest == null) return "Cue Preview: لا يوجد manifest.";
         StringBuilder builder = new StringBuilder("Cue Preview");
-        builder.append("\nملاحظة: رقم الكيو لا يفرض اسم الفيديو. المنفست هو الذي يحدد الملف.");
+        builder.append("\nملاحظة: رقم الكيو لا يفرض اسم الفيديو. المنفست هو الذي يحدد الملف والسلوك.");
         for (TabletCue cue : manifest.cues) {
-            builder.append("\nCue ").append(cue.tabletSequence)
-                    .append(" — ").append(cue.name);
+            builder.append("\n\nCue ").append(cue.tabletSequence)
+                    .append(" — ").append(cue.name)
+                    .append(" | StageCore Cue ").append(cue.sourceStageCoreSequence);
             for (TabletAction action : cue.actions) {
                 builder.append("\n  ")
                         .append(action.type)
                         .append(" → ")
-                        .append(mediaLabel(manifest, action.mediaKey));
+                        .append(mediaLabel(manifest, action.mediaKey))
+                        .append(" | loop=").append(action.loop)
+                        .append(" | end=").append(action.endBehavior)
+                        .append(" | fadeIn=").append(action.dissolveInMs)
+                        .append(" | fadeOut=").append(action.dissolveOutMs);
             }
         }
         return builder.toString();
@@ -657,10 +730,10 @@ public final class MainActivity extends Activity {
         String url = value(liveUrlInput, "");
         if (url.trim().isEmpty()) {
             lastError = "Live URL missing";
-            renderInfo("Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream");
+            showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
             return;
         }
-        showResult(player.showLive(url));
+        showResult("Test Live URL", player.showLive(url));
     }
 
     private void enterShowModeNow() {
@@ -685,6 +758,14 @@ public final class MainActivity extends Activity {
         getWindow().setAttributes(params);
     }
 
+    private void applyAwakeFlag() {
+        if (appSettings == null || appSettings.keepScreenAwake || appSettings.showLockEnabled) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
     private void applyOrientation(String orientation) {
         if (AppSettings.ORIENTATION_LANDSCAPE.equals(orientation)) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
@@ -696,8 +777,9 @@ public final class MainActivity extends Activity {
     }
 
     private void applyShowLockSurface() {
-        if (appSettings == null || !appSettings.showLockEnabled) return;
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (appSettings == null) return;
+        applyAwakeFlag();
+        if (!appSettings.showLockEnabled) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             WindowInsetsController controller = getWindow().getInsetsController();
             if (controller != null) {
@@ -728,9 +810,29 @@ public final class MainActivity extends Activity {
         appSettings.autoDiscover = autoDiscoverCheck == null || autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck == null || showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck == null || showLockCheck.isChecked();
+        appSettings.keepScreenAwake = keepAwakeCheck == null || keepAwakeCheck.isChecked();
         appSettings.heartbeatEnabled = heartbeatCheck == null || heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        applyAwakeFlag();
+    }
+
+    private String buildInfoSummary() {
+        return "Version: " + BuildConfig.VERSION_NAME
+                + " (" + BuildConfig.VERSION_CODE + ")"
+                + "\nBuild: " + BuildConfig.BUILD_LABEL
+                + "\nPackage: " + getPackageName();
+    }
+
+    private void openUpdatePage() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ali96adil/StageCore-TabletPlayer/actions"));
+            startActivity(intent);
+            showActionResult("Updates", "تم فتح صفحة GitHub Actions للتحديثات. التحديث الداخلي الكامل يحتاج endpoint ثابت للـAPK وتوقيع release.", "CHECK ⚠️", true);
+        } catch (Exception error) {
+            lastError = "Cannot open update page";
+            showActionResult("Updates", "ما كدرت أفتح صفحة التحديثات من هذا الجهاز.", "FAILED ❌", true);
+        }
     }
 
     private static String value(EditText editText, String fallback) {
