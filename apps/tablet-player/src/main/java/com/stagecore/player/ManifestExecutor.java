@@ -116,14 +116,14 @@ public final class ManifestExecutor {
             case "main.prepare":
                 return player.prepareMain(mediaResolver.resolveFile(activeManifest(), action.mediaKey));
             case "main.play":
-                return player.playMain(mediaResolver.resolveFile(activeManifest(), action.mediaKey));
+                return player.playMain(mediaResolver.resolveFile(activeManifest(), action.mediaKey), action.loop, action.endBehavior);
             case "main.pause":
                 return player.pauseMain();
             case "main.stop":
                 return player.stopMain();
             case "overlay.play":
                 if (missingMedia(action)) return CommandResult.failed("MEDIA_KEY_NOT_FOUND", "No media key " + action.mediaKey);
-                return player.playOverlay(mediaResolver.resolveFile(activeManifest(), action.mediaKey), action.dissolveInMs, action.dissolveOutMs);
+                return player.playOverlay(mediaResolver.resolveFile(activeManifest(), action.mediaKey), action.dissolveInMs, action.dissolveOutMs, action.loop, action.endBehavior);
             case "overlay.hide":
                 return player.hideOverlay(action.dissolveOutMs);
             case "live.show":

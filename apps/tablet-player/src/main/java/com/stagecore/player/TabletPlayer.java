@@ -15,6 +15,7 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import com.stagecore.player.model.CommandResult;
+import com.stagecore.player.model.TabletAction;
 
 import java.io.File;
 import java.io.IOException;
@@ -107,6 +108,10 @@ public final class TabletPlayer {
     }
 
     public CommandResult playMain(File file) {
+        return playMain(file, true, TabletAction.END_NONE);
+    }
+
+    public CommandResult playMain(File file, boolean loop, String endBehavior) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
         hideBlackout();
         hideLive();
@@ -117,12 +122,13 @@ public final class TabletPlayer {
         preparedMainFile = file;
         preparedMain = file.getName();
         mainPlaying = false;
-        mainVideo.prepare(Uri.fromFile(file), true, true, 0, () -> {
+        String finalEndBehavior = TabletAction.normalizeEndBehavior(endBehavior, TabletAction.END_NONE);
+        mainVideo.prepare(Uri.fromFile(file), loop, true, 0, () -> {
             mainPlaying = true;
-            showStatus("Playing main: " + currentMain);
-        });
-        showStatus("Loading main: " + currentMain);
-        return CommandResult.completed("Playing main " + file.getName());
+            showStatus("Playing main: " + currentMain + playbackLabel(loop, finalEndBehavior));
+        }, () -> handleMainCompletion(finalEndBehavior));
+        showStatus("Loading main: " + currentMain + playbackLabel(loop, finalEndBehavior));
+        return CommandResult.completed("Playing main " + file.getName() + playbackLabel(loop, finalEndBehavior));
     }
 
     public CommandResult pauseMain() {
@@ -148,6 +154,10 @@ public final class TabletPlayer {
     }
 
     public CommandResult playOverlay(File file, int dissolveInMs, int dissolveOutMs) {
+        return playOverlay(file, dissolveInMs, dissolveOutMs, false, TabletAction.END_CLEAR);
+    }
+
+    public CommandResult playOverlay(File file, int dissolveInMs, int dissolveOutMs, boolean loop, String endBehavior) {
         if (!isReadableFile(file)) return CommandResult.failed("MEDIA_NOT_FOUND", missing(file));
         overlayVideo.view.animate().cancel();
         overlayVideo.view.setAlpha(dissolveInMs <= 0 ? 1f : 0f);
@@ -156,11 +166,12 @@ public final class TabletPlayer {
         keepControlsOnTop();
         currentOverlay = file.getName();
         hideBlackout();
-        overlayVideo.prepare(Uri.fromFile(file), false, true, 0, () -> {
+        String finalEndBehavior = TabletAction.normalizeEndBehavior(endBehavior, TabletAction.END_CLEAR);
+        overlayVideo.prepare(Uri.fromFile(file), loop, true, 0, () -> {
             if (dissolveInMs > 0) overlayVideo.view.animate().alpha(1f).setDuration(dissolveInMs).start();
-        }, () -> hideOverlay(dissolveOutMs));
-        showStatus("Overlay: " + currentOverlay);
-        return CommandResult.completed("Playing overlay " + file.getName());
+        }, () -> handleOverlayCompletion(finalEndBehavior, dissolveOutMs));
+        showStatus("Overlay: " + currentOverlay + playbackLabel(loop, finalEndBehavior));
+        return CommandResult.completed("Playing overlay " + file.getName() + playbackLabel(loop, finalEndBehavior));
     }
 
     public CommandResult hideOverlay(int dissolveOutMs) {
@@ -257,6 +268,38 @@ public final class TabletPlayer {
                 + " live=" + currentLive
                 + " blackout=" + blackoutVisible
                 + " scale=" + videoScaleMode;
+    }
+
+    private void handleMainCompletion(String endBehavior) {
+        mainPlaying = false;
+        if (TabletAction.END_BLACKOUT.equals(endBehavior)) {
+            blackout();
+            return;
+        }
+        if (TabletAction.END_STOP.equals(endBehavior) || TabletAction.END_CLEAR.equals(endBehavior)) {
+            if (mainVideo != null) mainVideo.stopAndReset();
+            if (mainVideo != null) mainVideo.view.setVisibility(View.GONE);
+            currentMain = "none";
+            showStatus("Main completed and cleared");
+            return;
+        }
+        showStatus("Main completed: " + endBehavior);
+    }
+
+    private void handleOverlayCompletion(String endBehavior, int dissolveOutMs) {
+        if (TabletAction.END_BLACKOUT.equals(endBehavior)) {
+            blackout();
+            return;
+        }
+        if (TabletAction.END_CLEAR.equals(endBehavior) || TabletAction.END_STOP.equals(endBehavior)) {
+            hideOverlay(dissolveOutMs);
+            return;
+        }
+        showStatus("Overlay completed: " + endBehavior);
+    }
+
+    private String playbackLabel(boolean loop, String endBehavior) {
+        return " loop=" + loop + " end=" + endBehavior;
     }
 
     private void keepControlsOnTop() {

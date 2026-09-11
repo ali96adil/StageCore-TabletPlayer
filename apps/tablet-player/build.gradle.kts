@@ -10,8 +10,13 @@ android {
         applicationId = "com.stagecore.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 17
+        versionName = "0.1.17-pr17"
+        buildConfigField("String", "BUILD_LABEL", "\"PR17 cue-ui-batch\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

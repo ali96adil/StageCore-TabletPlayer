@@ -27,6 +27,7 @@ public final class AppSettings {
     public String orientationMode;
     public boolean showModeOnLaunch;
     public boolean showLockEnabled;
+    public boolean keepScreenAwake;
     public boolean heartbeatEnabled;
     public int heartbeatPort;
     public int heartbeatIntervalSeconds;
@@ -46,6 +47,7 @@ public final class AppSettings {
         settings.orientationMode = normalizeOrientation(prefs.getString("orientation_mode", ORIENTATION_AUTO));
         settings.showModeOnLaunch = prefs.getBoolean("show_mode_on_launch", true);
         settings.showLockEnabled = prefs.getBoolean("show_lock_enabled", true);
+        settings.keepScreenAwake = prefs.getBoolean("keep_screen_awake", true);
         settings.heartbeatEnabled = prefs.getBoolean("heartbeat_enabled", true);
         settings.heartbeatPort = clamp(prefs.getInt("heartbeat_port", 9100), 1, 65535);
         settings.heartbeatIntervalSeconds = clamp(prefs.getInt("heartbeat_interval_seconds", 10), 3, 60);
@@ -75,6 +77,7 @@ public final class AppSettings {
                 .putString("orientation_mode", orientationMode)
                 .putBoolean("show_mode_on_launch", showModeOnLaunch)
                 .putBoolean("show_lock_enabled", showLockEnabled)
+                .putBoolean("keep_screen_awake", keepScreenAwake)
                 .putBoolean("heartbeat_enabled", heartbeatEnabled)
                 .putInt("heartbeat_port", heartbeatPort)
                 .putInt("heartbeat_interval_seconds", heartbeatIntervalSeconds)
