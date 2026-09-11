@@ -57,12 +57,20 @@ public final class ManifestJsonCodec {
             if (actionArray != null) {
                 for (int a = 0; a < actionArray.length(); a++) {
                     JSONObject action = actionArray.getJSONObject(a);
+                    String type = required(action, "type");
+                    boolean loop = action.optBoolean("loop", TabletAction.defaultLoop(type));
+                    String endBehavior = action.optString(
+                            "end_behavior",
+                            action.optString("endBehavior", TabletAction.defaultEndBehavior(type))
+                    );
                     actions.add(new TabletAction(
                             required(action, "action_id", "actionId"),
-                            required(action, "type"),
+                            type,
                             action.optString("media_key", action.optString("mediaKey", null)),
                             action.optInt("dissolve_in_ms", action.optInt("dissolveInMs", 0)),
-                            action.optInt("dissolve_out_ms", action.optInt("dissolveOutMs", 0))
+                            action.optInt("dissolve_out_ms", action.optInt("dissolveOutMs", 0)),
+                            loop,
+                            endBehavior
                     ));
                 }
             }
