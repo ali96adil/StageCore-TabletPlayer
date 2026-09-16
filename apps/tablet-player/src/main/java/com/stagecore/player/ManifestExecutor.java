@@ -27,13 +27,16 @@ public final class ManifestExecutor {
 
     public CommandResult validateScope(String projectId, String snapshotId, String manifestId) {
         TabletManifest manifest = activeManifest();
-        if (!matches(projectId, manifest.stageCoreProjectId)) {
+        if (manifest == null) {
+            return CommandResult.failed("MANIFEST_UNAVAILABLE", "No active tablet manifest is available");
+        }
+        if (!matchesRequired(projectId, manifest.stageCoreProjectId)) {
             return CommandResult.rejected("PROJECT_MISMATCH", "Command project does not match active tablet manifest");
         }
-        if (!matches(snapshotId, manifest.runtimeSnapshotId)) {
+        if (!matchesRequired(snapshotId, manifest.runtimeSnapshotId)) {
             return CommandResult.rejected("SNAPSHOT_MISMATCH", "Command snapshot does not match active tablet manifest");
         }
-        if (!matches(manifestId, manifest.tabletManifestId)) {
+        if (!matchesOptional(manifestId, manifest.tabletManifestId)) {
             return CommandResult.rejected("MANIFEST_MISMATCH", "Command tablet manifest does not match active tablet manifest");
         }
         return CommandResult.completed("Scope accepted");
@@ -154,7 +157,14 @@ public final class ManifestExecutor {
         return media == null;
     }
 
-    private boolean matches(String incoming, String active) {
-        return incoming == null || incoming.trim().isEmpty() || incoming.equals(active);
+    private boolean matchesRequired(String incoming, String active) {
+        return incoming != null && active != null
+                && !incoming.trim().isEmpty() && !active.trim().isEmpty()
+                && incoming.equals(active);
+    }
+
+    private boolean matchesOptional(String incoming, String active) {
+        return incoming == null || incoming.trim().isEmpty()
+                || (active != null && !active.trim().isEmpty() && incoming.equals(active));
     }
 }
