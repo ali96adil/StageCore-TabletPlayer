@@ -18,6 +18,7 @@ public final class ManifestExecutor {
         this.manifestStore = manifestStore;
         this.mediaResolver = mediaResolver;
         this.player = player;
+        StageCoreRuntimeBridge.register(this);
     }
 
     public TabletManifest activeManifest() {
@@ -84,6 +85,13 @@ public final class ManifestExecutor {
         String url = mediaResolver.resolveLiveUrl(activeManifest(), mediaKey);
         return player.showLive(url);
     }
+
+    public CommandResult pauseMain() { return player.pauseMain(); }
+    public CommandResult stopMain() { return player.stopMain(); }
+    public CommandResult blackout() { return player.blackout(); }
+    public CommandResult clearBlackout() { return player.clearBlackout(); }
+    public CommandResult hideOverlay(long dissolveMs) { return player.hideOverlay(dissolveMs); }
+    public CommandResult hideLive() { return player.hideLive(); }
 
     private CommandResult prepareCue(TabletCue cue) {
         for (TabletAction action : cue.actions) {
