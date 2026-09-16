@@ -21,7 +21,7 @@ import java.util.Arrays;
  * X9.63 point because that is the wire format accepted by StageCore.
  */
 public final class StageCoreDeviceIdentity {
-    public static final String KEY_ALGORITHM = "ECDSA_P256_SHA256";
+    public static final String KEY_ALGORITHM = "P256_X963_SHA256";
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final String PREFIX = "stagecore.tablet.identity.";
 
