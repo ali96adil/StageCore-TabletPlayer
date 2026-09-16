@@ -31,13 +31,8 @@ public final class StageCoreClient {
         }
     }
 
-    public String deviceId() {
-        return deviceId;
-    }
-
-    public String deviceName() {
-        return deviceName;
-    }
+    public String deviceId() { return deviceId; }
+    public String deviceName() { return deviceName; }
 
     public List<String> baselineCapabilities() {
         ArrayList<String> capabilities = new ArrayList<>(Arrays.asList(
@@ -47,6 +42,7 @@ public final class StageCoreClient {
                 "tablet.media.pause",
                 "tablet.media.stop",
                 "tablet.media.blackout",
+                "tablet.media.blackout.clear",
                 "tablet.media.overlay.play",
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
