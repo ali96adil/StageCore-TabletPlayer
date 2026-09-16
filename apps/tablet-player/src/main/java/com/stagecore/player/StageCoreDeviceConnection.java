@@ -7,12 +7,12 @@ import android.os.Looper;
 import android.widget.Toast;
 
 import com.stagecore.player.model.CommandResult;
+import com.stagecore.player.model.CommandStatus;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -210,15 +210,12 @@ public final class StageCoreDeviceConnection {
             String projectId = command.optString("project_id", "");
             String snapshotId = command.optString("runtime_snapshot_id", "");
             JSONObject payload = command.optJSONObject("payload");
+            String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
             main.post(() -> {
-                CommandResult result;
-                ManifestExecutor executor = null;
-                // Scope is enforced by the manifest-aware command implementation.
-                if (!projectId.isEmpty() && !projectId.equals(StageCoreRuntimeBridge.projectId())) {
-                    result = CommandResult.rejected("PROJECT_MISMATCH", "Command project does not match active tablet project");
-                } else {
-                    result = StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload);
-                }
+                CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
+                CommandResult result = scope.status == CommandStatus.COMPLETED
+                        ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
+                        : scope;
                 remember(commandId);
                 sendResult(webSocket, settingsDeviceId(), commandId, result);
                 sendObservation(webSocket);
