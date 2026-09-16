@@ -29,6 +29,12 @@ public final class StageCoreRuntimeBridge {
         return manifest == null ? "" : safe(manifest.stageCoreProjectId);
     }
 
+    public static CommandResult validateScope(String projectId, String snapshotId, String manifestId) {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
+        return executor.validateScope(projectId, snapshotId, manifestId);
+    }
+
     public static JSONObject observedState() {
         TabletManifest manifest = manifest();
         JSONObject object = new JSONObject();
