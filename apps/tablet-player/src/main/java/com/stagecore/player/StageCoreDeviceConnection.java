@@ -209,13 +209,22 @@ public final class StageCoreDeviceConnection {
             }
             String projectId = command.optString("project_id", "");
             String snapshotId = command.optString("runtime_snapshot_id", "");
+            String commandType = command.optString("command_type", "");
             JSONObject payload = command.optJSONObject("payload");
             String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
             main.post(() -> {
-                CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
-                CommandResult result = scope.status == CommandStatus.COMPLETED
-                        ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
-                        : scope;
+                CommandResult result;
+                if ("TABLET_MANIFEST_APPLY".equals(commandType)) {
+                    // Manifest publication establishes the new scope, so it must
+                    // validate against the incoming manifest rather than the old
+                    // active manifest.
+                    result = StageCoreRuntimeBridge.applyManifest(projectId, snapshotId, payload);
+                } else {
+                    CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
+                    result = scope.status == CommandStatus.COMPLETED
+                            ? StageCoreRuntimeBridge.execute(commandType, payload)
+                            : scope;
+                }
                 remember(commandId);
                 sendResult(webSocket, settingsDeviceId(), commandId, result);
                 sendObservation(webSocket);
