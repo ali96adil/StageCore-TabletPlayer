@@ -93,7 +93,10 @@ public final class ManifestExecutor {
     public CommandResult stopMain() { return player.stopMain(); }
     public CommandResult blackout() { return player.blackout(); }
     public CommandResult clearBlackout() { return player.clearBlackout(); }
-    public CommandResult hideOverlay(long dissolveMs) { return player.hideOverlay(dissolveMs); }
+    public CommandResult hideOverlay(long dissolveMs) {
+        long bounded = Math.max(0L, Math.min(Integer.MAX_VALUE, dissolveMs));
+        return player.hideOverlay((int) bounded);
+    }
     public CommandResult hideLive() { return player.hideLive(); }
 
     private CommandResult prepareCue(TabletCue cue) {
