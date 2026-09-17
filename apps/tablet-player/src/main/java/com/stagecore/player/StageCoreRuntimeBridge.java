@@ -35,14 +35,26 @@ public final class StageCoreRuntimeBridge {
         return executor.validateScope(projectId, snapshotId, manifestId);
     }
 
+    public static CommandResult applyManifest(String projectId, String snapshotId, JSONObject payload) {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
+        JSONObject manifestObject = payload == null ? null : payload.optJSONObject("manifest");
+        return executor.applyManifest(projectId, snapshotId, manifestObject);
+    }
+
     public static JSONObject observedState() {
         TabletManifest manifest = manifest();
+        ManifestExecutor executor = EXECUTOR.get();
         JSONObject object = new JSONObject();
         try {
             if (manifest != null) {
                 object.put("project_id", safe(manifest.stageCoreProjectId));
                 object.put("runtime_snapshot_id", safe(manifest.runtimeSnapshotId));
                 object.put("tablet_manifest_id", safe(manifest.tabletManifestId));
+                object.put("tablet_manifest_schema", safe(manifest.schemaVersion));
+                object.put("tablet_cue_count", manifest.cues.size());
+                object.put("tablet_media_count", manifest.media.size());
+                if (executor != null) object.put("tablet_manifest_source", executor.activeManifestSource());
             }
         } catch (Exception ignored) {}
         return object;
