@@ -7,9 +7,14 @@ import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
+import org.json.JSONObject;
+
 import java.io.File;
 
 public final class ManifestExecutor {
+    private static final int MAX_REMOTE_MEDIA_ITEMS = 2048;
+    private static final int MAX_REMOTE_CUES = 2048;
+
     private final ManifestStore manifestStore;
     private final MediaResolver mediaResolver;
     private final TabletPlayer player;
@@ -23,6 +28,48 @@ public final class ManifestExecutor {
 
     public TabletManifest activeManifest() {
         return manifestStore.activeManifest();
+    }
+
+    public String activeManifestSource() {
+        return manifestStore.activeSource();
+    }
+
+    public String mediaScanSummary() {
+        return mediaResolver.scanSummary(activeManifest());
+    }
+
+    public CommandResult applyManifest(String projectId, String snapshotId, JSONObject manifestObject) {
+        if (manifestObject == null) {
+            return CommandResult.rejected("MANIFEST_PAYLOAD_MISSING", "StageCore tablet manifest payload is missing");
+        }
+
+        final TabletManifest candidate;
+        final String raw = manifestObject.toString();
+        try {
+            candidate = ManifestJsonCodec.parse(raw);
+        } catch (Exception error) {
+            return CommandResult.rejected("MANIFEST_INVALID", "Invalid tablet manifest: " + error.getMessage());
+        }
+
+        if (!"tablet_manifest/1".equals(candidate.schemaVersion)) {
+            return CommandResult.rejected("MANIFEST_SCHEMA_UNSUPPORTED", "Unsupported tablet manifest schema " + candidate.schemaVersion);
+        }
+        if (!matchesRequired(projectId, candidate.stageCoreProjectId)) {
+            return CommandResult.rejected("PROJECT_MISMATCH", "Remote manifest project does not match command project");
+        }
+        if (!matchesRequired(snapshotId, candidate.runtimeSnapshotId)) {
+            return CommandResult.rejected("SNAPSHOT_MISMATCH", "Remote manifest snapshot does not match command snapshot");
+        }
+        if (candidate.media.size() > MAX_REMOTE_MEDIA_ITEMS || candidate.cues.size() > MAX_REMOTE_CUES) {
+            return CommandResult.rejected("MANIFEST_TOO_LARGE", "Tablet manifest exceeds bounded media/cue limits");
+        }
+
+        try {
+            manifestStore.applyFromStageCore(raw, mediaResolver.manifestFile());
+        } catch (Exception error) {
+            return CommandResult.failed("MANIFEST_ACTIVATION_FAILED", "Could not persist tablet manifest: " + error.getMessage());
+        }
+        return CommandResult.completed("Applied tablet manifest " + candidate.tabletManifestId);
     }
 
     public CommandResult validateScope(String projectId, String snapshotId, String manifestId) {
