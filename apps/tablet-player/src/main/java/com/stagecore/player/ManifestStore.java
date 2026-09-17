@@ -8,9 +8,12 @@ import com.stagecore.player.model.TabletManifest;
 import org.json.JSONException;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,7 +22,7 @@ public final class ManifestStore {
     private TabletManifest activeManifest;
     private String activeSource = "none";
 
-    public TabletManifest loadFromDisk(File manifestFile) throws IOException, JSONException {
+    public synchronized TabletManifest loadFromDisk(File manifestFile) throws IOException, JSONException {
         if (manifestFile == null) throw new IOException("Manifest file is null");
         if (!manifestFile.exists() || !manifestFile.isFile()) {
             throw new IOException("Manifest file not found: " + manifestFile.getAbsolutePath());
@@ -30,7 +33,50 @@ public final class ManifestStore {
         return activeManifest;
     }
 
-    public TabletManifest tryLoadFromDiskOrSample(File manifestFile) {
+    public synchronized TabletManifest applyFromStageCore(String json, File manifestFile) throws IOException, JSONException {
+        if (json == null || json.trim().isEmpty()) throw new JSONException("Tablet manifest payload is empty");
+        if (manifestFile == null) throw new IOException("Manifest file is null");
+
+        // Parse first so malformed network input can never replace the last
+        // known-good local manifest.
+        TabletManifest candidate = ManifestJsonCodec.parse(json);
+        if (!"tablet_manifest/1".equals(candidate.schemaVersion)) {
+            throw new JSONException("Unsupported tablet manifest schema: " + candidate.schemaVersion);
+        }
+
+        File parent = manifestFile.getParentFile();
+        if (parent == null) throw new IOException("Manifest parent directory is unavailable");
+        if (!parent.exists() && !parent.mkdirs() && !parent.exists()) {
+            throw new IOException("Unable to create manifest directory: " + parent.getAbsolutePath());
+        }
+
+        File temporary = new File(parent, manifestFile.getName() + ".stagecore.tmp");
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        try (FileOutputStream output = new FileOutputStream(temporary, false)) {
+            output.write(bytes);
+            output.flush();
+            output.getFD().sync();
+        }
+
+        try {
+            Files.move(
+                    temporary.toPath(),
+                    manifestFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+            );
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(temporary.toPath(), manifestFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            if (temporary.exists()) temporary.delete();
+        }
+
+        activeManifest = candidate;
+        activeSource = "stagecore:" + manifestFile.getAbsolutePath();
+        return activeManifest;
+    }
+
+    public synchronized TabletManifest tryLoadFromDiskOrSample(File manifestFile) {
         try {
             return loadFromDisk(manifestFile);
         } catch (Exception ignored) {
@@ -38,7 +84,7 @@ public final class ManifestStore {
         }
     }
 
-    public TabletManifest loadBundledSample() {
+    public synchronized TabletManifest loadBundledSample() {
         Map<String, MediaItemRef> media = new LinkedHashMap<>();
         media.put("main.01", new MediaItemRef("main.01", "main", "main_01.mp4", null));
         media.put("overlay.01", new MediaItemRef("overlay.01", "overlay", "overlay_01.mp4", null));
@@ -74,12 +120,12 @@ public final class ManifestStore {
         return activeManifest;
     }
 
-    public TabletManifest activeManifest() {
+    public synchronized TabletManifest activeManifest() {
         if (activeManifest == null) return loadBundledSample();
         return activeManifest;
     }
 
-    public String activeSource() {
+    public synchronized String activeSource() {
         return activeSource;
     }
 }
