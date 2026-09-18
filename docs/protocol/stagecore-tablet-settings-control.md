@@ -1,4 +1,8 @@
-# StageCore Tablet Settings Control Foundation
+# StageCore Tablet Settings Control
+
+## V1 official-channel status
+
+This document describes the settings-control foundation and future control surface. In Tablet Player V1 RC3 these settings/media-maintenance capabilities are **not advertised in `device.hello`** and are **not executable through `stagecore.device/1`** yet. Production capability advertisement is limited to commands implemented by `StageCoreRuntimeBridge`. Local settings and rehearsal utilities remain available on-device until a later StageCore slice implements the authenticated settings commands end to end. Foundation
 
 ## Purpose
 
