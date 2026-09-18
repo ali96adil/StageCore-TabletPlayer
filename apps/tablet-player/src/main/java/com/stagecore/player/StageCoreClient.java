@@ -37,7 +37,6 @@ public final class StageCoreClient {
     public List<String> baselineCapabilities() {
         ArrayList<String> capabilities = new ArrayList<>(Arrays.asList(
                 "tablet.media.prepare",
-                "tablet.media.select",
                 "tablet.media.play",
                 "tablet.media.pause",
                 "tablet.media.stop",
