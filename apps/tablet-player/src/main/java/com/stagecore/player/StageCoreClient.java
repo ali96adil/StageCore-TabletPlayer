@@ -35,7 +35,7 @@ public final class StageCoreClient {
     public String deviceName() { return deviceName; }
 
     public List<String> baselineCapabilities() {
-        ArrayList<String> capabilities = new ArrayList<>(Arrays.asList(
+        return new ArrayList<>(Arrays.asList(
                 "tablet.media.prepare",
                 "tablet.media.play",
                 "tablet.media.pause",
@@ -45,13 +45,8 @@ public final class StageCoreClient {
                 "tablet.media.overlay.play",
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
-                "tablet.media.live.hide",
-                "tablet.health.heartbeat",
-                "tablet.health.read",
-                "tablet.alert.problem"
+                "tablet.media.live.hide"
         ));
-        capabilities.addAll(StageCoreSettingsContract.settingsCapabilities());
-        return capabilities;
     }
 
     public String hello(TabletManifest manifest) {
