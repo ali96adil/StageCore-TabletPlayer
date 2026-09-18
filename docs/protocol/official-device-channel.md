@@ -72,6 +72,8 @@ TABLET_LIVE_SHOW      -> show manifest live source
 TABLET_LIVE_HIDE      -> hide live source
 ```
 
+V1 deliberately has no separate `TABLET_SELECT_MEDIA` command. `TABLET_PREPARE` is the canonical selection/preload operation, so the tablet never advertises a media capability that the runtime bridge cannot execute.
+
 Playback remains owned by `ManifestExecutor`/`TabletPlayer`; the transport does not own media state.
 
 ## Secure transport

@@ -1,5 +1,9 @@
 # StageCore Tablet Health Heartbeat Foundation
 
+## V1 transport status
+
+The existing UDP heartbeat remains a rehearsal/status compatibility path. Tablet Player V1 RC3 does **not** advertise `tablet.health.*` as executable Stage Device capabilities. The authenticated production channel reports runtime state with `device.observation`; periodic authenticated health telemetry can be added later without pretending an unsupported command exists.
+
 ## Purpose
 
 StageCore Player tablets should report lightweight health/status information back to StageCore during setup, rehearsal, and show mode. The goal is operator awareness without wasting tablet battery or flooding the local network.
