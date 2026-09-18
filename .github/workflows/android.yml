@@ -22,8 +22,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
-      - name: Build tablet player debug APK
-        run: gradle :apps:tablet-player:assembleDebug --no-daemon
+      - name: Test and build tablet player debug APK
+        run: gradle :apps:tablet-player:testDebugUnitTest :apps:tablet-player:assembleDebug --no-daemon
       - name: Upload tablet player debug APK
         uses: actions/upload-artifact@v4
         with:
