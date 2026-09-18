@@ -10,8 +10,8 @@ android {
         applicationId = "com.stagecore.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 101
-        versionName = "1.0.0-rc2"
+        versionCode = 102
+        versionName = "1.0.0-rc3"
         buildConfigField("String", "BUILD_LABEL", "\"© 2026 Ali Adil — ali96adil@gmail.com — All rights reserved\"")
     }
 
@@ -27,4 +27,5 @@ android {
 
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    testImplementation("junit:junit:4.13.2")
 }
