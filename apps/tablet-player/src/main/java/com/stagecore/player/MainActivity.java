@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private TextView resultDetails;
     private TextView discoveryInfo;
     private TextView brightnessLabel;
+    private TextView liveRotationLabel;
     private TextView readinessBadge;
     private View controlsPanel;
     private LinearLayout advancedDebugPanel;
@@ -114,6 +115,7 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         player.attachTo(root);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         addControls(root);
         addHotCorner(root);
         setContentView(root);
@@ -216,6 +218,15 @@ public final class MainActivity extends Activity {
         panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
+        liveRotationLabel = help("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        panel.addView(liveRotationLabel);
+        panel.addView(rowButtons(
+                button("0°", v -> setLiveRotation(0)),
+                button("90°", v -> setLiveRotation(90)),
+                button("180°", v -> setLiveRotation(180)),
+                button("270°", v -> setLiveRotation(270))
+        ));
+        panel.addView(help("لف الكاميرا عمودياً ثم اختر 90° أو 270° حسب اتجاهها. Fit يعرض الصورة كاملة؛ Crop يقص الحواف."));
         liveUrlInput = editText();
         liveUrlInput.setText("http://192.168.3.80:81/stream");
         panel.addView(field("Live URL", liveUrlInput));
@@ -473,6 +484,7 @@ public final class MainActivity extends Activity {
         if (keepAwakeCheck != null) keepAwakeCheck.setChecked(appSettings.keepScreenAwake);
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
+        if (liveRotationLabel != null) liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
         updateReadinessBadge();
         updateStatusHeader();
     }
@@ -493,6 +505,7 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         refreshSettingsFields();
         showActionResult("Save Settings", "تم حفظ الإعدادات.", "READY ✅", false);
         applyShowLockSurface();
@@ -505,6 +518,18 @@ public final class MainActivity extends Activity {
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         refreshSettingsFields();
         showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
+        pokeHeartbeat();
+    }
+
+    private void setLiveRotation(int degrees) {
+        appSettings.liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        appSettings.save(this);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
+        if (liveRotationLabel != null) {
+            liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        }
+        showActionResult("Live Rotation", "تم تدوير صورة Live إلى " + appSettings.liveRotationDegrees
+                + "° بدون تغيير فيديوهات MP4.", "READY ✅", false);
         pokeHeartbeat();
     }
 
@@ -617,6 +642,7 @@ public final class MainActivity extends Activity {
                 + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
+                + " | دوران Live: " + appSettings.liveRotationDegrees + "°"
                 + " | السطوع: " + appSettings.brightnessPercent + "%"
                 + "\nآخر أمر: " + lastAction + " — " + lastActionState);
     }
