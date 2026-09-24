@@ -41,6 +41,7 @@ public final class TabletPlayer {
     private boolean blackoutVisible = false;
     private boolean statusPinned = false;
     private String videoScaleMode = AppSettings.SCALE_FIT;
+    private int liveRotationDegrees;
 
     public TabletPlayer(Context context) {
         this.context = context;
@@ -91,6 +92,11 @@ public final class TabletPlayer {
         }
         applyKnownLayouts();
         if (mjpegLive != null) mjpegLive.applyScale(videoScaleMode);
+    }
+
+    public void setLiveRotation(int degrees) {
+        liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        if (mjpegLive != null) mjpegLive.applyRotation(liveRotationDegrees);
     }
 
     public String videoScaleMode() {
@@ -216,6 +222,7 @@ public final class TabletPlayer {
             liveVideo.stopAndReset();
             liveVideo.view.setVisibility(View.GONE);
             mjpegLive.applyScale(videoScaleMode);
+            mjpegLive.applyRotation(liveRotationDegrees);
             mjpegLive.setAlpha(1f);
             mjpegLive.setVisibility(View.VISIBLE);
             mjpegLive.bringToFront();
@@ -319,7 +326,8 @@ public final class TabletPlayer {
                 + " overlay=" + currentOverlay
                 + " live=" + currentLive
                 + " blackout=" + blackoutVisible
-                + " scale=" + videoScaleMode;
+                + " scale=" + videoScaleMode
+                + " live_rotation=" + liveRotationDegrees;
     }
 
     private void handleMainCompletion(String endBehavior) {
