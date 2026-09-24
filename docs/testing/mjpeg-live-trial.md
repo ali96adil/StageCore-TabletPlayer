@@ -24,7 +24,7 @@ StageCore MJPEG Trial. Do not uninstall or overwrite RC3 to run this test.
 4. Query relay health: expect one extra viewer (viewer is an HTTP connection,
    not necessarily a distinct device).
 5. Tap Hide Live; confirm viewer slot released. Repeat three times.
-6. Rotate, test Fit/Crop/Full, and verify MP4 main/overlay still work.
+6. While playing Live, physically turn the camera into portrait and switch the new\n   Live Rotation buttons through 0/90/180/270 degrees; choose 90 or 270 so\n   the image is upright. Fit must show the complete 4:3 sensor frame rotated\n   to 3:4, Crop may cut sides, Full may distort aspect. Restart trial and\n   confirm the selected Live Rotation persists for this device. Verify MP4\n   main/overlay still work and tablet screen orientation is independent.
 7. Temporarily interrupt camera Wi-Fi and restore; record bounded retry and
    READY recovery (if firmware instead remains in provisioning, log separately).
 
