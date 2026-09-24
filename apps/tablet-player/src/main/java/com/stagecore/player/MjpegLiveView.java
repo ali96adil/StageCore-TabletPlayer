@@ -3,6 +3,7 @@ package com.stagecore.player;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.ImageView;
@@ -39,10 +40,13 @@ final class MjpegLiveView extends ImageView {
     private volatile HttpURLConnection activeConnection;
     private volatile Listener listener;
     private boolean released;
+    private Bitmap displayedFrame;
+    private int rotationDegrees;
+    private String scaleMode = AppSettings.SCALE_FIT;
 
     MjpegLiveView(Context context) {
         super(context);
-        setScaleType(ScaleType.FIT_CENTER);
+        setScaleType(ScaleType.MATRIX);
     }
 
     void play(String url, Listener listener) {
@@ -60,6 +64,7 @@ final class MjpegLiveView extends ImageView {
         if (old != null) old.disconnect();
         pendingFrame.set(null);
         framePosted.set(false);
+        displayedFrame = null;
         setImageDrawable(null);
     }
 
@@ -71,9 +76,32 @@ final class MjpegLiveView extends ImageView {
     }
 
     void applyScale(String mode) {
-        if (AppSettings.SCALE_CROP.equals(mode)) setScaleType(ScaleType.CENTER_CROP);
-        else if (AppSettings.SCALE_FULL.equals(mode)) setScaleType(ScaleType.FIT_XY);
-        else setScaleType(ScaleType.FIT_CENTER);
+        scaleMode = mode;
+        updateTransform();
+    }
+
+    void applyRotation(int degrees) {
+        rotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        updateTransform();
+    }
+
+    @Override
+    protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        updateTransform();
+    }
+
+    private void updateTransform() {
+        Bitmap image = displayedFrame;
+        if (image == null || getWidth() <= 0 || getHeight() <= 0) return;
+        LiveImageGeometry geometry = LiveImageGeometry.of(image.getWidth(), image.getHeight(),
+                getWidth(), getHeight(), rotationDegrees, scaleMode);
+        Matrix matrix = new Matrix();
+        matrix.postTranslate(-image.getWidth() / 2f, -image.getHeight() / 2f);
+        matrix.postRotate(rotationDegrees);
+        matrix.postScale(geometry.scaleX, geometry.scaleY);
+        matrix.postTranslate(getWidth() / 2f, getHeight() / 2f);
+        setImageMatrix(matrix);
     }
 
     private void readLoop(String url, int current) {
@@ -139,7 +167,11 @@ final class MjpegLiveView extends ImageView {
             if (!isCurrent(current)) return;
             framePosted.set(false);
             Bitmap latest = pendingFrame.getAndSet(null);
-            if (latest != null) setImageBitmap(latest);
+            if (latest != null) {
+                displayedFrame = latest;
+                setImageBitmap(latest);
+                updateTransform();
+            }
         });
     }
 
