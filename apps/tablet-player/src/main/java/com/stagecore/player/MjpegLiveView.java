@@ -112,6 +112,7 @@ final class MjpegLiveView extends ImageView {
                 }
             } catch (IOException | RuntimeException error) {
                 if (isCurrent(current)) {
+                    ready = false;
                     retries++;
                     emitError(current, error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
                     android.util.Log.w("StageCorePlayer", "MJPEG interrupted; retry=" + retries, error);
@@ -135,9 +136,10 @@ final class MjpegLiveView extends ImageView {
         pendingFrame.set(bitmap);
         if (!framePosted.compareAndSet(false, true)) return;
         main.post(() -> {
+            if (!isCurrent(current)) return;
             framePosted.set(false);
             Bitmap latest = pendingFrame.getAndSet(null);
-            if (latest != null && isCurrent(current)) setImageBitmap(latest);
+            if (latest != null) setImageBitmap(latest);
         });
     }
 
