@@ -82,6 +82,17 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
 
         player = new TabletPlayer(this);
+        player.setLiveStatusListener(new MjpegLiveView.Listener() {
+            @Override public void onReady() {
+                showActionResult("Test Live URL", "First live frame rendered.", "READY ✅", true);
+                pokeHeartbeat();
+            }
+            @Override public void onError(String reason) {
+                lastError = "Live: " + reason;
+                showActionResult("Test Live URL", "Live error: " + reason + "\nRetrying while Live is active.", "FAILED ❌", true);
+                pokeHeartbeat();
+            }
+        });
         manifestStore = new ManifestStore();
         mediaResolver = new MediaResolver();
         mediaResolver.ensureBaseDir();
@@ -157,6 +168,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (heartbeatReporter != null) heartbeatReporter.stop();
+        if (player != null) player.release();
         if (oscServer != null) oscServer.stop();
         if (discovery != null) discovery.stop();
         super.onDestroy();
@@ -748,7 +760,12 @@ public final class MainActivity extends Activity {
             showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
             return;
         }
-        showResult("Test Live URL", player.showLive(url));
+        CommandResult result = player.showLive(url);
+        if (!"OK".equals(result.code)) {
+            showResult("Test Live URL", result);
+        } else {
+            showActionResult("Test Live URL", "Connecting to Live URL; waiting for first frame.", "CHECK ⚠️", true);
+        }
     }
 
     private void enterShowModeNow() {
