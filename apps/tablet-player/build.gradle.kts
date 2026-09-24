@@ -15,6 +15,14 @@ android {
         buildConfigField("String", "BUILD_LABEL", "\"© 2026 Ali Adil — ali96adil@gmail.com — All rights reserved\"")
     }
 
+    // Isolate the experimental MJPEG APK from the installed RC3 release.
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".mjpegtrial"
+            versionNameSuffix = "-mjpegtrial"
+        }
+    }
+
     buildFeatures {
         buildConfig = true
     }
