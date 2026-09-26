@@ -30,7 +30,7 @@ import okhttp3.WebSocketListener;
  * The transport is deliberately independent from legacy OSC. It authenticates
  * with the existing StageCore Companion authority, connects to the dedicated
  * Stage Device WebSocket, never replays commands after reconnect, and reports
- * results/observations using stagecore.device/1.
+ * device inventory observations using stagecore.device/2.
  */
 public final class StageCoreDeviceConnection {
     private final Context context;
@@ -47,6 +47,12 @@ public final class StageCoreDeviceConnection {
     private volatile WebSocket socket;
     private volatile String lastStatus = "IDLE";
     private volatile String pendingPairingCode = "";
+    private volatile String assignmentState = "UNKNOWN";
+    private volatile long assignmentEpoch;
+    private volatile long connectionGeneration;
+    private volatile String assignedProjectId = "";
+    private volatile String assignedRuntimeSnapshotId = "";
+    private volatile boolean runtimeAuthorityReady;
 
     public StageCoreDeviceConnection(Context context) {
         this.context = context.getApplicationContext();
@@ -67,15 +73,15 @@ public final class StageCoreDeviceConnection {
 
     public String status() { return lastStatus; }
     public String pendingPairingCode() { return pendingPairingCode; }
+    public String assignmentState() { return assignmentState; }
+    public long assignmentEpoch() { return assignmentEpoch; }
+    public String assignedProjectId() { return assignedProjectId; }
+    public String assignedRuntimeSnapshotId() { return assignedRuntimeSnapshotId; }
 
     private void connectionLoop() {
         long backoffMs = 1000;
         while (!stopped) {
             try {
-                if (!StageCoreRuntimeBridge.isReady()) {
-                    sleep(500);
-                    continue;
-                }
                 AppSettings settings = AppSettings.load(context);
                 if (settings.serverHost == null || settings.serverHost.trim().isEmpty()) {
                     lastStatus = "WAITING_FOR_SERVER";
@@ -149,11 +155,15 @@ public final class StageCoreDeviceConnection {
 
             @Override public void onClosed(WebSocket webSocket, int code, String reason) {
                 if (socket == webSocket) socket = null;
+                runtimeAuthorityReady = false;
+                connectionGeneration = 0;
                 lastStatus = "DISCONNECTED";
             }
 
             @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
                 if (socket == webSocket) socket = null;
+                runtimeAuthorityReady = false;
+                connectionGeneration = 0;
                 lastStatus = "DISCONNECTED:" + t.getClass().getSimpleName();
                 synchronized (openedLock) { openedLock.notifyAll(); }
             }
@@ -173,7 +183,6 @@ public final class StageCoreDeviceConnection {
             json.put("type", "device.hello");
             json.put("schema_version", 1);
             json.put("device_id", settings.deviceId);
-            json.put("project_id", StageCoreRuntimeBridge.projectId());
             json.put("profile_id", "stagecore.tablet-player");
             json.put("device_kind", "TABLET_PLAYER");
             json.put("display_name", settings.deviceName);
@@ -182,8 +191,8 @@ public final class StageCoreDeviceConnection {
             json.put("client_version", BuildConfig.VERSION_NAME);
             json.put("protocol_version", StageCoreClient.PROTOCOL);
             json.put("capabilities", new JSONArray(descriptor.baselineCapabilities()));
-            json.put("readiness", "READY");
-            json.put("observed_state", StageCoreRuntimeBridge.observedState());
+            json.put("readiness", "BLOCKER");
+            json.put("observed_state", StageCoreRuntimeBridge.inventoryObservedState());
             json.put("network_state", new JSONObject().put("transport", "WSS"));
         } catch (Exception ignored) {}
         return json;
@@ -192,44 +201,188 @@ public final class StageCoreDeviceConnection {
     private void handleMessage(WebSocket webSocket, String raw) {
         try {
             JSONObject message = new JSONObject(raw);
+            if (message.optInt("schema_version", -1) != 2
+                    || !settingsDeviceId().equals(message.optString("device_id", ""))) {
+                throw new IllegalStateException("StageCore v2 envelope mismatch");
+            }
             String type = message.optString("type", "");
-            if ("runtime.ready".equals(type)) {
-                lastStatus = "READY";
+            switch (type) {
+                case "assignment.state":
+                    acceptAssignmentState(webSocket, message);
+                    return;
+                case "tablet.assignment.prepare":
+                    handleAssignmentPrepare(webSocket, message);
+                    return;
+                case "runtime.ready":
+                    acceptRuntimeReady(webSocket, message);
+                    return;
+                case "command.execute":
+                    handleCommand(webSocket, message);
+                    return;
+                case "display.state":
+                    return; // Tablet Player has no Stage Display surface.
+                default:
+                    throw new IllegalStateException("unsupported StageCore v2 message " + type);
+            }
+        } catch (Exception ignored) {
+            lastStatus = "PROTOCOL_ERROR";
+            runtimeAuthorityReady = false;
+            webSocket.close(1002, "StageCore v2 protocol error");
+        }
+    }
+
+    private void acceptAssignmentState(WebSocket webSocket, JSONObject message) throws Exception {
+        String state = message.optString("state", "");
+        long epoch = message.optLong("assignment_epoch", 0);
+        long generation = message.optLong("connection_generation", 0);
+        String projectId = message.optString("project_id", "");
+        String snapshotId = message.optString("runtime_snapshot_id", "");
+        if (epoch < 1 || generation < 1
+                || (!"UNASSIGNED".equals(state) && !"ACTIVE".equals(state))) {
+            throw new IllegalStateException("unsupported tablet assignment state");
+        }
+        if (message.optBoolean("commands_enabled", true)) {
+            throw new IllegalStateException("assignment.state cannot enable commands");
+        }
+        if ("UNASSIGNED".equals(state) && (!projectId.isEmpty() || !snapshotId.isEmpty())) {
+            throw new IllegalStateException("unassigned tablet carries Project scope");
+        }
+        if ("ACTIVE".equals(state) && (projectId.isEmpty() || snapshotId.isEmpty()
+                || !message.optBoolean("scope_ack_required", false))) {
+            throw new IllegalStateException("active tablet scope is incomplete");
+        }
+
+        runtimeAuthorityReady = false;
+        assignmentState = state;
+        assignmentEpoch = epoch;
+        connectionGeneration = generation;
+        assignedProjectId = projectId;
+        assignedRuntimeSnapshotId = snapshotId;
+        lastStatus = "V2_" + state;
+
+        if ("UNASSIGNED".equals(state)) {
+            if (message.optBoolean("safe_media_required", false) && StageCoreRuntimeBridge.isReady()) {
+                main.post(() -> {
+                    StageCoreRuntimeBridge.enterAssignmentSafeState();
+                    sendObservation(webSocket);
+                });
+            } else {
+                sendObservation(webSocket);
+            }
+            return;
+        }
+
+        main.post(() -> {
+            CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, "");
+            if (scope.status != CommandStatus.COMPLETED) {
+                lastStatus = "V2_SCOPE_MISMATCH";
                 sendObservation(webSocket);
                 return;
             }
-            if ("display.state".equals(type)) {
-                return; // tablet media player has no Stage Display surface.
+            sendScopeAck(webSocket, projectId, snapshotId, epoch, generation);
+        });
+    }
+
+    private void handleAssignmentPrepare(WebSocket webSocket, JSONObject message) {
+        String assignmentId = message.optString("assignment_id", "");
+        String challenge = message.optString("challenge", "");
+        long epoch = message.optLong("assignment_epoch", 0);
+        long generation = message.optLong("connection_generation", 0);
+        if (assignmentId.isEmpty() || challenge.isEmpty() || epoch != assignmentEpoch
+                || generation != connectionGeneration
+                || !message.optBoolean("safe_media_required", false)) {
+            throw new IllegalStateException("tablet assignment prepare mismatch");
+        }
+        runtimeAuthorityReady = false;
+        main.post(() -> {
+            CommandResult safe = StageCoreRuntimeBridge.enterAssignmentSafeState();
+            boolean ok = safe.status == CommandStatus.COMPLETED;
+            try {
+                JSONObject ack = new JSONObject()
+                        .put("type", "tablet.assignment.safe_ack")
+                        .put("schema_version", 2)
+                        .put("device_id", settingsDeviceId())
+                        .put("assignment_id", assignmentId)
+                        .put("assignment_epoch", epoch)
+                        .put("connection_generation", generation)
+                        .put("challenge", challenge)
+                        .put("safe_media", ok);
+                webSocket.send(ack.toString());
+                lastStatus = ok ? "V2_ASSIGNMENT_SAFE" : "V2_ASSIGNMENT_SAFE_FAILED";
+            } catch (Exception ignored) {
+                lastStatus = "PROTOCOL_ERROR";
+                webSocket.close(1002, "unable to acknowledge safe media");
             }
-            if (!"command.execute".equals(type)) return;
-            JSONObject command = message.getJSONObject("command");
-            String commandId = command.getString("command_id");
-            synchronized (completedCommandIds) {
-                if (completedCommandIds.contains(commandId)) return;
-            }
-            String projectId = command.optString("project_id", "");
-            String snapshotId = command.optString("runtime_snapshot_id", "");
-            JSONObject payload = command.optJSONObject("payload");
-            String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
-            main.post(() -> {
-                CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
-                CommandResult result = scope.status == CommandStatus.COMPLETED
-                        ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
-                        : scope;
-                remember(commandId);
-                sendResult(webSocket, settingsDeviceId(), commandId, result);
-                sendObservation(webSocket);
-            });
+        });
+    }
+
+    private void sendScopeAck(WebSocket webSocket, String projectId, String snapshotId, long epoch, long generation) {
+        try {
+            JSONObject ack = new JSONObject()
+                    .put("type", "assignment.scope_ack")
+                    .put("schema_version", 2)
+                    .put("device_id", settingsDeviceId())
+                    .put("project_id", projectId)
+                    .put("runtime_snapshot_id", snapshotId)
+                    .put("assignment_epoch", epoch)
+                    .put("connection_generation", generation)
+                    .put("readiness", "READY")
+                    .put("observed_state", StageCoreRuntimeBridge.observedState())
+                    .put("network_state", new JSONObject().put("transport", "WSS"));
+            webSocket.send(ack.toString());
+            lastStatus = "V2_SCOPE_ACK_SENT";
         } catch (Exception ignored) {
             lastStatus = "PROTOCOL_ERROR";
+            webSocket.close(1002, "unable to acknowledge tablet scope");
         }
+    }
+
+    private void acceptRuntimeReady(WebSocket webSocket, JSONObject message) {
+        if (!"ACTIVE".equals(assignmentState)
+                || message.optLong("assignment_epoch", 0) != assignmentEpoch
+                || message.optLong("connection_generation", 0) != connectionGeneration
+                || !assignedProjectId.equals(message.optString("project_id", ""))
+                || !assignedRuntimeSnapshotId.equals(message.optString("runtime_snapshot_id", ""))
+                || !message.optBoolean("commands_enabled", false)) {
+            throw new IllegalStateException("runtime.ready does not match active tablet scope");
+        }
+        runtimeAuthorityReady = true;
+        lastStatus = "READY";
+        sendObservation(webSocket);
+    }
+
+    private void handleCommand(WebSocket webSocket, JSONObject message) throws Exception {
+        if (!runtimeAuthorityReady || !"ACTIVE".equals(assignmentState)) {
+            throw new IllegalStateException("tablet runtime authority is not active");
+        }
+        JSONObject command = message.getJSONObject("command");
+        String commandId = command.getString("command_id");
+        synchronized (completedCommandIds) {
+            if (completedCommandIds.contains(commandId)) return;
+        }
+        String projectId = command.optString("project_id", "");
+        String snapshotId = command.optString("runtime_snapshot_id", "");
+        if (!assignedProjectId.equals(projectId) || !assignedRuntimeSnapshotId.equals(snapshotId)) {
+            throw new IllegalStateException("command scope differs from Hub assignment");
+        }
+        JSONObject payload = command.optJSONObject("payload");
+        String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
+        main.post(() -> {
+            CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
+            CommandResult result = scope.status == CommandStatus.COMPLETED
+                    ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
+                    : scope;
+            remember(commandId);
+            sendResult(webSocket, settingsDeviceId(), commandId, result);
+            sendObservation(webSocket);
+        });
     }
 
     private void sendResult(WebSocket webSocket, String deviceId, String commandId, CommandResult result) {
         try {
             JSONObject json = new JSONObject()
                     .put("type", "command.result")
-                    .put("schema_version", 1)
+                    .put("schema_version", 2)
                     .put("device_id", deviceId)
                     .put("command_id", commandId)
                     .put("status", result.status.toString())
@@ -247,12 +400,15 @@ public final class StageCoreDeviceConnection {
 
     private void sendObservation(WebSocket webSocket) {
         try {
+            boolean ready = runtimeAuthorityReady && "ACTIVE".equals(assignmentState);
             JSONObject json = new JSONObject()
                     .put("type", "device.observation")
-                    .put("schema_version", 1)
+                    .put("schema_version", 2)
                     .put("device_id", settingsDeviceId())
-                    .put("readiness", StageCoreRuntimeBridge.isReady() ? "READY" : "BLOCKER")
-                    .put("observed_state", StageCoreRuntimeBridge.observedState())
+                    .put("readiness", ready ? "READY" : "BLOCKER")
+                    .put("observed_state", ready
+                            ? StageCoreRuntimeBridge.observedState()
+                            : StageCoreRuntimeBridge.inventoryObservedState())
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(json.toString());
         } catch (Exception ignored) {}

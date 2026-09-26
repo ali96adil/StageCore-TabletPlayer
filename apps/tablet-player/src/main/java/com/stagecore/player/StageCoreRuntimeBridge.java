@@ -1,6 +1,7 @@
 package com.stagecore.player;
 
 import com.stagecore.player.model.CommandResult;
+import com.stagecore.player.model.CommandStatus;
 import com.stagecore.player.model.TabletManifest;
 
 import org.json.JSONObject;
@@ -46,6 +47,48 @@ public final class StageCoreRuntimeBridge {
             }
         } catch (Exception ignored) {}
         return object;
+    }
+
+    /**
+     * Device-level observation used before a Hub-owned Project assignment exists.
+     * It deliberately excludes Project and Runtime Snapshot authority so a stale
+     * local manifest cannot self-assign this tablet to a show.
+     */
+    public static JSONObject inventoryObservedState() {
+        TabletManifest manifest = manifest();
+        JSONObject object = new JSONObject();
+        try {
+            object.put("player_ready", isReady());
+            object.put("local_manifest_present", manifest != null);
+            if (manifest != null) {
+                object.put("local_tablet_manifest_id", safe(manifest.tabletManifestId));
+            }
+        } catch (Exception ignored) {}
+        return object;
+    }
+
+    public static CommandResult enterAssignmentSafeState() {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) {
+            return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready for assignment");
+        }
+        CommandResult result = executor.stopMain();
+        if (result.status != CommandStatus.COMPLETED) {
+            return CommandResult.failed("SAFE_MEDIA_STOP_FAILED", result.message);
+        }
+        result = executor.hideOverlay(0);
+        if (result.status != CommandStatus.COMPLETED) {
+            return CommandResult.failed("SAFE_MEDIA_OVERLAY_FAILED", result.message);
+        }
+        result = executor.hideLive();
+        if (result.status != CommandStatus.COMPLETED) {
+            return CommandResult.failed("SAFE_MEDIA_LIVE_FAILED", result.message);
+        }
+        result = executor.blackout();
+        if (result.status != CommandStatus.COMPLETED) {
+            return CommandResult.failed("SAFE_MEDIA_BLACKOUT_FAILED", result.message);
+        }
+        return CommandResult.completed("Tablet entered assignment safe-media state");
     }
 
     public static CommandResult execute(String commandType, JSONObject payload) {
