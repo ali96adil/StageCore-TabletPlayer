@@ -181,7 +181,7 @@ public final class StageCoreDeviceConnection {
         JSONObject json = new JSONObject();
         try {
             json.put("type", "device.hello");
-            json.put("schema_version", 2);
+            json.put("schema_version", 1);
             json.put("device_id", settings.deviceId);
             json.put("profile_id", "stagecore.tablet-player");
             json.put("device_kind", "TABLET_PLAYER");
@@ -382,7 +382,7 @@ public final class StageCoreDeviceConnection {
         try {
             JSONObject json = new JSONObject()
                     .put("type", "command.result")
-                    .put("schema_version", 1)
+                    .put("schema_version", 2)
                     .put("device_id", deviceId)
                     .put("command_id", commandId)
                     .put("status", result.status.toString())
