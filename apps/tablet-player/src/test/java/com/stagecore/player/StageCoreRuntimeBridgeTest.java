@@ -1,11 +1,21 @@
 package com.stagecore.player;
 
+import com.stagecore.player.model.CommandStatus;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public final class StageCoreRuntimeBridgeTest {
+    @Test
+    public void acceptedCommandResultDoesNotCarryAnErrorObject() {
+        assertFalse(StageCoreDeviceConnection.shouldAttachError(CommandStatus.ACCEPTED));
+        assertFalse(StageCoreDeviceConnection.shouldAttachError(CommandStatus.COMPLETED));
+        assertTrue(StageCoreDeviceConnection.shouldAttachError(CommandStatus.FAILED));
+        assertTrue(StageCoreDeviceConnection.shouldAttachError(CommandStatus.TIMED_OUT));
+    }
+
     @Test
     public void directLiveUrlAcceptsAbsoluteHttpAndHttpsWithoutCredentials() {
         assertTrue(StageCoreRuntimeBridge.isAllowedDirectLiveUrl(
