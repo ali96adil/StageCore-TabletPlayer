@@ -37,6 +37,30 @@ public final class StageCoreRuntimeBridge {
         return executor.validateScope(projectId, snapshotId, manifestId);
     }
 
+    public static CommandResult validateV2ManifestHint(String manifestId) {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
+        return executor.validateV2ManifestHint(manifestId);
+    }
+
+    /**
+     * v2 observation mirrors the Hub-owned active scope while retaining only
+     * local content identity from tablet_manifest.json. Legacy manifest
+     * Project/Snapshot fields must never self-assign a v2 tablet.
+     */
+    public static JSONObject assignedObservedState(String projectId, String snapshotId) {
+        TabletManifest manifest = manifest();
+        JSONObject object = new JSONObject();
+        try {
+            object.put("project_id", safe(projectId));
+            object.put("runtime_snapshot_id", safe(snapshotId));
+            if (manifest != null) {
+                object.put("tablet_manifest_id", safe(manifest.tabletManifestId));
+            }
+        } catch (Exception ignored) {}
+        return object;
+    }
+
     public static JSONObject observedState() {
         TabletManifest manifest = manifest();
         JSONObject object = new JSONObject();
