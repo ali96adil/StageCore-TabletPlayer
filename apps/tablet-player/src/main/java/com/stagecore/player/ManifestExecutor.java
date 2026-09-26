@@ -89,6 +89,10 @@ public final class ManifestExecutor {
         return player.showLive(url);
     }
 
+    public CommandResult showLiveUrl(String url) {
+        return player.showLive(url);
+    }
+
     public CommandResult pauseMain() { return player.pauseMain(); }
     public CommandResult stopMain() { return player.stopMain(); }
     public CommandResult blackout() { return player.blackout(); }
