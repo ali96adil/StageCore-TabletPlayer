@@ -138,7 +138,7 @@ public final class StageCoreDeviceConnection {
                 connectWebSocket(baseUrl, settings, descriptor, session, trustedTransport);
                 backoffMs = 1000;
                 while (!stopped && socket != null) sleep(500);
-            } catch (javax.net.ssl.SSLHandshakeException tlsError) {
+            } catch (javax.net.ssl.SSLException tlsError) {
                 lastStatus = "TLS_IDENTITY_MISMATCH";
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);

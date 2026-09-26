@@ -46,6 +46,7 @@ public final class MainActivity extends Activity {
     private MediaResolver mediaResolver;
     private AppSettings appSettings;
     private StageCoreHubCandidate pendingHubCandidate;
+    private boolean discoveryAmbiguous;
     private final ExecutorService hubTrustWorker = Executors.newSingleThreadExecutor();
 
     private TextView statusHeader;
@@ -565,6 +566,7 @@ public final class MainActivity extends Activity {
     private void startDiscovery(boolean visibleFeedback) {
         saveSettingsFromFieldsWithoutRender();
         pendingHubCandidate = null;
+        discoveryAmbiguous = false;
         if (visibleFeedback && discoveryInfo != null) {
             discoveryInfo.setText("جاري البحث الآمن عن StageCore Hub داخل الشبكة...");
         }
@@ -579,15 +581,14 @@ public final class MainActivity extends Activity {
                         showActionResult("Discovery", message, "CHECK ⚠️", true);
                         return;
                     }
-                    appSettings.trustHub(candidate);
-                    appSettings.save(MainActivity.this);
-                    pendingHubCandidate = null;
-                    refreshSettingsFields();
-                    String message = "تم العثور على Hub الموثوق وتحديث عنوانه بأمان: "
-                            + appSettings.serverLabel();
+                    verifyRememberedHubEndpoint(candidate);
+                    return;
+                }
+
+                if (discoveryAmbiguous) {
+                    String message = "يوجد أكثر من Hub مختلف في الاكتشاف. أوقف البحث وأعده بعد تحديد Hub واحد.";
                     if (discoveryInfo != null) discoveryInfo.setText(message);
-                    showActionResult("Discovery", message, "READY ✅", true);
-                    pokeHeartbeat();
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
                     return;
                 }
 
@@ -595,6 +596,7 @@ public final class MainActivity extends Activity {
                         && (!pendingHubCandidate.hubId.equals(candidate.hubId)
                         || !pendingHubCandidate.tlsCertificateSha256.equals(candidate.tlsCertificateSha256))) {
                     pendingHubCandidate = null;
+                    discoveryAmbiguous = true;
                     String message = "تم العثور على أكثر من Hub مختلف. لن يتم اعتماد أي واحد تلقائياً.";
                     if (discoveryInfo != null) discoveryInfo.setText(message);
                     showActionResult("Discovery", message, "CHECK ⚠️", true);
@@ -619,6 +621,14 @@ public final class MainActivity extends Activity {
 
     private void trustDiscoveredHub() {
         StageCoreHubCandidate candidate = pendingHubCandidate;
+        if (discoveryAmbiguous) {
+            showActionResult(
+                    "Trust Hub",
+                    "الاكتشاف يحتوي أكثر من Hub مختلف. لن يتم اعتماد أي واحد حتى تعيد البحث بمرشح واحد.",
+                    "CHECK ⚠️",
+                    true);
+            return;
+        }
         if (candidate == null) {
             showActionResult(
                     "Trust Hub",
@@ -635,10 +645,12 @@ public final class MainActivity extends Activity {
                         candidate.tlsCertificateSha256);
                 StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
                 runOnUiThread(() -> {
-                    if (pendingHubCandidate != candidate) return;
+                    if (!sameHubCandidate(pendingHubCandidate, candidate) || discoveryAmbiguous) return;
                     appSettings.trustHub(candidate);
                     appSettings.save(MainActivity.this);
                     pendingHubCandidate = null;
+                    discoveryAmbiguous = false;
+                    if (discovery != null) discovery.stop();
                     refreshSettingsFields();
                     String message = "تم اعتماد StageCore Hub بعد تطابق TLS والهوية: "
                             + appSettings.serverLabel();
@@ -654,6 +666,45 @@ public final class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void verifyRememberedHubEndpoint(StageCoreHubCandidate candidate) {
+        hubTrustWorker.execute(() -> {
+            try {
+                okhttp3.OkHttpClient transport = StageCoreHubTransport.makeClient(
+                        candidate.resolvedHost,
+                        candidate.tlsCertificateSha256);
+                StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
+                runOnUiThread(() -> {
+                    if (!appSettings.matchesTrustedHub(candidate)) return;
+                    appSettings.trustHub(candidate);
+                    appSettings.save(MainActivity.this);
+                    refreshSettingsFields();
+                    String message = "تم التحقق من Hub الموثوق وتحديث عنوانه: "
+                            + appSettings.serverLabel();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "READY ✅", true);
+                    pokeHeartbeat();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    String message = "تم تجاهل عنوان Hub محفوظ الهوية لأن تحقق TLS/identity فشل.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                });
+            }
+        });
+    }
+
+    private static boolean sameHubCandidate(
+            StageCoreHubCandidate first, StageCoreHubCandidate second) {
+        return first != null
+                && second != null
+                && first.hubId.equals(second.hubId)
+                && first.fingerprint.equals(second.fingerprint)
+                && first.tlsCertificateSha256.equals(second.tlsCertificateSha256)
+                && first.resolvedHost.equals(second.resolvedHost)
+                && first.port == second.port;
     }
 
     private void stopDiscovery() {
