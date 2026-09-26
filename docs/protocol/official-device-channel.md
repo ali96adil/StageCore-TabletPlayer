@@ -2,13 +2,15 @@
 
 ## Authority
 
-The production tablet authority path is `stagecore.device/1`. Legacy OSC UDP/9000 remains available for rehearsal and diagnostics, but it is not the authoritative StageCore control path.
+The next project-independent tablet transport uses `stagecore.device/2`. Legacy OSC UDP/9000 remains available for rehearsal and diagnostics, but it is not authoritative StageCore show control.
+
+This branch implements **device identity / inventory bootstrap only**. It deliberately does not enable tablet show commands until the Hub-owned tablet assignment handshake is implemented end to end.
 
 ## Identity and pairing
 
-The app keeps a P-256 signing key in Android Keystore. Its public identity is exported as the uncompressed 65-byte X9.63 point and standard Base64 using StageCore algorithm identifier `P256_X963_SHA256`.
+The app keeps a P-256 signing key in Android Keystore. Pairing and trust belong to the physical tablet and trusted Hub, not to a StageCore Project.
 
-Pairing/auth endpoints:
+Pairing/auth endpoints remain:
 
 ```text
 POST /api/v1/companion/pairing/requests
@@ -17,18 +19,9 @@ POST /api/v1/companion/auth/challenges
 POST /api/v1/companion/auth/sessions
 ```
 
-The authentication signature is `SHA256withECDSA` over:
+The app never stores the private key outside Android Keystore. Runtime session tokens are reacquired after disconnect/session expiry rather than treated as permanent credentials.
 
-```text
-StageCore Companion Authentication v1
-<device-id>
-<challenge-id>
-<nonce-base64>
-```
-
-The app never stores the private key outside Android Keystore. StageCore runtime session tokens are short lived and are reacquired after disconnect/session expiry rather than being treated as permanent credentials.
-
-## Runtime
+## Project-independent v2 bootstrap
 
 The app connects to:
 
@@ -39,47 +32,54 @@ Authorization: StageCoreSession <session-token>
 
 First client message is `device.hello` with:
 
-- `device_kind = TABLET_PLAYER`
-- `profile_id = stagecore.tablet-player`
-- `protocol_version = stagecore.device/1`
-- stable `device_id`
-- project scope from the active tablet manifest
-- advertised tablet capabilities
-- readiness and initial observed state
+- `device_kind = TABLET_PLAYER`;
+- `profile_id = stagecore.tablet-player`;
+- `protocol_version = stagecore.device/2`;
+- stable `device_id`;
+- device metadata and implemented tablet capabilities;
+- `readiness = BLOCKER` until Hub assignment authority is active;
+- device-level observed state only.
 
-StageCore replies with `runtime.ready`, then sends `command.execute` messages. The tablet returns `command.result` and publishes `device.observation`.
+The v2 hello **does not contain Project ID, Runtime Snapshot ID or Tablet Manifest ID as authority**. A stale local manifest cannot move the tablet into another Project.
+
+The tablet may connect even when the playback runtime or a local manifest is not ready. This is intentional: the Hub must be able to discover and inventory the physical tablet independently from show content.
+
+## Hub-owned assignment bootstrap
+
+For this slice the Hub may return only:
+
+- `assignment.state / UNASSIGNED`, with no Project;
+- `assignment.state / BLOCKED`, with the Hub-owned Project ID and assignment epoch;
+- `commands_enabled = false`.
+
+The tablet validates those invariants and publishes a schema-v2 blocker observation. It does not persist the Project as device identity.
+
+Receiving `runtime.ready` or `command.execute` before the future tablet-assignment activation handshake is implemented is treated as a protocol violation and fails closed. This prevents a projectless bootstrap build from accidentally executing stale v1 show commands.
 
 ## Reconnect semantics
 
-- Exponential reconnect is bounded.
+- Pairing identity is preserved across Projects.
 - Authentication is reacquired before opening a replacement runtime channel.
-- Command IDs completed by the process are kept in a small duplicate guard.
-- The client never proactively replays a previously received command.
-- StageCore may send safe persisted display state after reconnect; media commands are not replayed.
+- The client never replays a previously received show command.
+- Hub assignment is re-read after reconnect; the tablet does not self-assert a previous Project.
+- Local media manifests remain content/runtime data, not device ownership.
 
-## Current media command mapping
+## Future activation contract
 
-```text
-TABLET_PREPARE        -> cue/media prepare
-TABLET_PLAY           -> cue/media play
-TABLET_PAUSE          -> main pause
-TABLET_STOP           -> main stop
-TABLET_BLACKOUT       -> blackout
-TABLET_BLACKOUT_CLEAR -> clear blackout
-TABLET_OVERLAY_PLAY   -> overlay media
-TABLET_OVERLAY_CLEAR  -> hide overlay
-TABLET_LIVE_SHOW      -> show manifest live source
-TABLET_LIVE_HIDE      -> hide live source
-```
+A subsequent Hub + Tablet slice must add a tablet-specific safe-state / assignment activation handshake. That handshake must:
 
-V1 deliberately has no separate `TABLET_SELECT_MEDIA` command. `TABLET_PREPARE` is the canonical selection/preload operation, so the tablet never advertises a media capability that the runtime bridge cannot execute.
+1. place the player into a defined safe media state;
+2. fence commands from the old Project/Snapshot;
+3. bind the exact Hub-owned Project, Runtime Snapshot and Tablet Manifest scope;
+4. require acknowledgment before READY;
+5. never replay PREPARE/PLAY/overlay/live commands after transfer or reconnect.
 
-Playback remains owned by `ManifestExecutor`/`TabletPlayer`; the transport does not own media state.
+Only after that contract is implemented and qualified may `stagecore.device/2` accept normal tablet media commands.
 
 ## Secure transport
 
-StageCore rejects remote pairing/runtime requests that are not on its secure-device transport. The Android client therefore requires HTTPS/WSS for non-loopback Hub connections and does not install a trust-all TLS manager.
+Remote pairing/runtime still requires HTTPS/WSS. The Android client does not install a trust-all TLS manager.
 
 ## Qualification
 
-Before calling this production-ready, CI must build the APK and the StageCore core tests must pass. Then perform one physical Android/Pi gate covering pairing approval, command execution/results, observation updates, disconnect/reconnect, session renewal/revocation, media-missing behavior, and coexistence with legacy OSC debug mode.
+This source slice is not production-ready by CI alone. Before deployment it requires the matching StageCore Hub v2 assignment implementation and a physical Android/Pi gate covering pairing, unassigned inventory visibility, assignment, scope fencing, command execution, disconnect/reconnect and stale-command rejection.
