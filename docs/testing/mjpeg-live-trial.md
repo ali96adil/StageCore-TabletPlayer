@@ -27,6 +27,17 @@ StageCore MJPEG Trial. Do not uninstall or overwrite RC3 to run this test.
 6. While playing Live, physically turn the camera into portrait and switch the new\n   Live Rotation buttons through 0/90/180/270 degrees; choose 90 or 270 so\n   the image is upright. Fit must show the complete 4:3 sensor frame rotated\n   to 3:4, Crop may cut sides, Full may distort aspect. Restart trial and\n   confirm the selected Live Rotation persists for this device. Verify MP4\n   main/overlay still work and tablet screen orientation is independent.
 7. Temporarily interrupt camera Wi-Fi and restore; record bounded retry and
    READY recovery (if firmware instead remains in provisioning, log separately).
+8. From StageCore, dispatch `TABLET_LIVE_SHOW` with the relay Direct URL.
+   The command may be ACCEPTED while connecting, but it must not become
+   COMPLETED until the first frame is rendered. If no frame arrives within the
+   first-frame deadline, expect one TIMED_OUT result and the relay viewer slot
+   to be released.
+9. With the tablet already assigned ACTIVE to a Project, cold-start the app.
+   The process-wide device connection may register before MainActivity finishes
+   loading media state, but the tablet must become READY without a manual
+   disconnect/reconnect once the local manifest is ready. Legacy Project and
+   Runtime Snapshot fields in tablet_manifest.json must not block the Hub-owned
+   ACTIVE assignment.
 
 ## Gate C — four physical tablets
 
