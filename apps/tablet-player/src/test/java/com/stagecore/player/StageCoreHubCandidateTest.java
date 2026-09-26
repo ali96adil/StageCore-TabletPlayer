@@ -26,6 +26,22 @@ public final class StageCoreHubCandidateTest {
     }
 
     @Test
+    public void rememberedBindingReconstructsPinnedEndpoint() {
+        StageCoreHubCandidate hub = StageCoreHubCandidate.remembered(
+                "01234567-89ab-cdef-8123-456789abcdef",
+                "SHA256:example",
+                repeat('a', 64),
+                "192.168.3.130",
+                7841);
+
+        assertEquals("https://192.168.3.130:7841", hub.baseUrl());
+        assertTrue(hub.matchesBinding(
+                "01234567-89ab-cdef-8123-456789abcdef",
+                "SHA256:example",
+                repeat('a', 64)));
+    }
+
+    @Test
     public void rejectsLegacyServiceAndPinMismatch() {
         assertThrows(IllegalArgumentException.class, () ->
                 StageCoreHubCandidate.fromTxt(validTxt(), "192.168.3.130", 7841, "_stagecore._tcp."));

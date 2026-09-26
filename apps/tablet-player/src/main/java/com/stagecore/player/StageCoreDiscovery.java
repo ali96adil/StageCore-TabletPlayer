@@ -7,23 +7,23 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public final class StageCoreDiscovery {
     public interface Callback {
-        void onFound(String name, String host, int port, String serviceType);
+        void onFound(StageCoreHubCandidate candidate);
         void onStatus(String message);
     }
 
     public static final String[] SERVICE_TYPES = new String[] {
-            "_stagecore._tcp.",
-            "_stagecore-hub._tcp."
+            StageCoreHubCandidate.SERVICE_TYPE
     };
 
     private final NsdManager nsdManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final List<NsdManager.DiscoveryListener> listeners = new ArrayList<>();
+    private final java.util.List<NsdManager.DiscoveryListener> listeners = new java.util.ArrayList<>();
     private volatile boolean running = false;
 
     public StageCoreDiscovery(Context context) {
@@ -52,7 +52,7 @@ public final class StageCoreDiscovery {
     public void stop() {
         running = false;
         if (nsdManager == null) return;
-        for (NsdManager.DiscoveryListener listener : new ArrayList<>(listeners)) {
+        for (NsdManager.DiscoveryListener listener : new java.util.ArrayList<>(listeners)) {
             try {
                 nsdManager.stopServiceDiscovery(listener);
             } catch (IllegalArgumentException | IllegalStateException ignored) {
@@ -64,36 +64,30 @@ public final class StageCoreDiscovery {
 
     private NsdManager.DiscoveryListener listenerFor(String serviceType, Callback callback) {
         return new NsdManager.DiscoveryListener() {
-            @Override
-            public void onDiscoveryStarted(String regType) {
-                status(callback, "جاري البحث عن StageCore عبر Bonjour: " + regType);
+            @Override public void onDiscoveryStarted(String regType) {
+                status(callback, "جاري البحث الآمن عن StageCore عبر Bonjour");
             }
 
-            @Override
-            public void onServiceFound(NsdServiceInfo serviceInfo) {
+            @Override public void onServiceFound(NsdServiceInfo serviceInfo) {
                 if (!running) return;
                 String type = serviceInfo.getServiceType();
                 if (type == null || !type.equals(serviceType)) return;
                 resolve(serviceInfo, callback);
             }
 
-            @Override
-            public void onServiceLost(NsdServiceInfo serviceInfo) {
-                status(callback, "اختفى سيرفر StageCore: " + serviceInfo.getServiceName());
+            @Override public void onServiceLost(NsdServiceInfo serviceInfo) {
+                status(callback, "اختفى StageCore Hub: " + serviceInfo.getServiceName());
             }
 
-            @Override
-            public void onDiscoveryStopped(String serviceType) {
+            @Override public void onDiscoveryStopped(String serviceType) {
                 status(callback, "توقف البحث التلقائي");
             }
 
-            @Override
-            public void onStartDiscoveryFailed(String serviceType, int errorCode) {
+            @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {
                 status(callback, "فشل بدء البحث: " + serviceType + " code=" + errorCode);
             }
 
-            @Override
-            public void onStopDiscoveryFailed(String serviceType, int errorCode) {
+            @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {
                 status(callback, "فشل إيقاف البحث: " + serviceType + " code=" + errorCode);
             }
         };
@@ -102,29 +96,42 @@ public final class StageCoreDiscovery {
     private void resolve(NsdServiceInfo serviceInfo, Callback callback) {
         try {
             nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
-                @Override
-                public void onResolveFailed(NsdServiceInfo serviceInfo, int errorCode) {
-                    status(callback, "تعذر قراءة عنوان السيرفر: " + serviceInfo.getServiceName() + " code=" + errorCode);
+                @Override public void onResolveFailed(NsdServiceInfo serviceInfo, int errorCode) {
+                    status(callback, "تعذر قراءة عنوان StageCore Hub: "
+                            + serviceInfo.getServiceName() + " code=" + errorCode);
                 }
 
-                @Override
-                public void onServiceResolved(NsdServiceInfo resolved) {
+                @Override public void onServiceResolved(NsdServiceInfo resolved) {
                     InetAddress host = resolved.getHost();
                     if (host == null) {
-                        status(callback, "تم العثور على StageCore بدون عنوان IP واضح");
+                        status(callback, "تم العثور على StageCore Hub بدون عنوان IP واضح");
                         return;
                     }
-                    mainHandler.post(() -> callback.onFound(
-                            resolved.getServiceName(),
-                            host.getHostAddress(),
-                            resolved.getPort(),
-                            resolved.getServiceType()
-                    ));
+                    try {
+                        StageCoreHubCandidate candidate = StageCoreHubCandidate.fromTxt(
+                                decodeTxt(resolved.getAttributes()),
+                                host.getHostAddress(),
+                                resolved.getPort(),
+                                resolved.getServiceType());
+                        mainHandler.post(() -> callback.onFound(candidate));
+                    } catch (IllegalArgumentException error) {
+                        status(callback, "تم تجاهل إعلان StageCore غير صالح: " + error.getMessage());
+                    }
                 }
             });
         } catch (IllegalArgumentException | IllegalStateException ex) {
-            status(callback, "تعذر حل عنوان StageCore: " + ex.getMessage());
+            status(callback, "تعذر حل عنوان StageCore Hub: " + ex.getMessage());
         }
+    }
+
+    static Map<String, String> decodeTxt(Map<String, byte[]> attributes) {
+        Map<String, String> txt = new LinkedHashMap<>();
+        if (attributes == null) return txt;
+        for (Map.Entry<String, byte[]> entry : attributes.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            txt.put(entry.getKey(), new String(entry.getValue(), StandardCharsets.UTF_8));
+        }
+        return txt;
     }
 
     private void status(Callback callback, String message) {

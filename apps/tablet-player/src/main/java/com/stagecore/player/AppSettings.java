@@ -21,6 +21,9 @@ public final class AppSettings {
     public String deviceName;
     public String serverHost;
     public int serverPort;
+    public String trustedHubId;
+    public String trustedHubFingerprint;
+    public String trustedHubTlsSha256;
     public boolean autoDiscover;
     public int brightnessPercent;
     public String videoScaleMode;
@@ -42,6 +45,9 @@ public final class AppSettings {
         settings.deviceName = nonBlank(prefs.getString("device_name", null), "Tablet " + suffix(settings.deviceId));
         settings.serverHost = prefs.getString("server_host", "");
         settings.serverPort = clamp(prefs.getInt("server_port", 8080), 1, 65535);
+        settings.trustedHubId = prefs.getString("trusted_hub_id", "");
+        settings.trustedHubFingerprint = prefs.getString("trusted_hub_fingerprint", "");
+        settings.trustedHubTlsSha256 = prefs.getString("trusted_hub_tls_sha256", "");
         settings.autoDiscover = prefs.getBoolean("auto_discover", true);
         settings.brightnessPercent = clamp(prefs.getInt("brightness_percent", 100), 5, 100);
         settings.videoScaleMode = normalizeScale(prefs.getString("video_scale_mode", SCALE_FIT));
@@ -62,6 +68,9 @@ public final class AppSettings {
         deviceName = nonBlank(deviceName, "Tablet " + suffix(deviceId));
         serverHost = serverHost == null ? "" : serverHost.trim();
         serverPort = clamp(serverPort, 1, 65535);
+        trustedHubId = trustedHubId == null ? "" : trustedHubId.trim().toLowerCase(Locale.US);
+        trustedHubFingerprint = trustedHubFingerprint == null ? "" : trustedHubFingerprint.trim();
+        trustedHubTlsSha256 = trustedHubTlsSha256 == null ? "" : trustedHubTlsSha256.trim().toLowerCase(Locale.US);
         brightnessPercent = clamp(brightnessPercent, 5, 100);
         videoScaleMode = normalizeScale(videoScaleMode);
         liveRotationDegrees = normalizeLiveRotation(liveRotationDegrees);
@@ -74,6 +83,9 @@ public final class AppSettings {
                 .putString("device_name", deviceName)
                 .putString("server_host", serverHost)
                 .putInt("server_port", serverPort)
+                .putString("trusted_hub_id", trustedHubId)
+                .putString("trusted_hub_fingerprint", trustedHubFingerprint)
+                .putString("trusted_hub_tls_sha256", trustedHubTlsSha256)
                 .putBoolean("auto_discover", autoDiscover)
                 .putInt("brightness_percent", brightnessPercent)
                 .putString("video_scale_mode", videoScaleMode)
@@ -86,6 +98,51 @@ public final class AppSettings {
                 .putInt("heartbeat_port", heartbeatPort)
                 .putInt("heartbeat_interval_seconds", heartbeatIntervalSeconds)
                 .apply();
+    }
+
+    public boolean hasTrustedHub() {
+        try {
+            trustedHubCandidate();
+            return true;
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
+    }
+
+    public boolean matchesTrustedHub(StageCoreHubCandidate candidate) {
+        return candidate != null && hasTrustedHub()
+                && candidate.matchesBinding(
+                        trustedHubId,
+                        trustedHubFingerprint,
+                        trustedHubTlsSha256);
+    }
+
+    public StageCoreHubCandidate trustedHubCandidate() {
+        return StageCoreHubCandidate.remembered(
+                trustedHubId,
+                trustedHubFingerprint,
+                trustedHubTlsSha256,
+                serverHost,
+                serverPort);
+    }
+
+    public void trustHub(StageCoreHubCandidate candidate) {
+        if (candidate == null) throw new IllegalArgumentException("Hub candidate is required");
+        serverHost = candidate.resolvedHost;
+        serverPort = candidate.port;
+        trustedHubId = candidate.hubId;
+        trustedHubFingerprint = candidate.fingerprint;
+        trustedHubTlsSha256 = candidate.tlsCertificateSha256;
+    }
+
+    public void clearTrustedHub() {
+        trustedHubId = "";
+        trustedHubFingerprint = "";
+        trustedHubTlsSha256 = "";
+    }
+
+    public String hubTrustLabel() {
+        return hasTrustedHub() ? "موثوق" : "بانتظار اعتماد Hub";
     }
 
     public String serverLabel() {

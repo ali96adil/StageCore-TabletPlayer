@@ -104,6 +104,47 @@ public final class StageCoreHubCandidate {
                 resolvedPort);
     }
 
+    public static StageCoreHubCandidate remembered(
+            String hubId,
+            String fingerprint,
+            String tlsCertificateSha256,
+            String resolvedHost,
+            int port) {
+        String normalizedHubId;
+        try {
+            normalizedHubId = UUID.fromString(trim(hubId)).toString().toLowerCase(Locale.US);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("invalid remembered Hub ID", error);
+        }
+        String normalizedFingerprint = trim(fingerprint);
+        String normalizedPin = trim(tlsCertificateSha256).toLowerCase(Locale.US);
+        String endpoint = trim(resolvedHost);
+        if (normalizedFingerprint.isEmpty()
+                || !isValidCertificateSha256(normalizedPin)
+                || endpoint.isEmpty()
+                || endpoint.contains("://")
+                || endpoint.contains("/")
+                || endpoint.contains("\\")
+                || endpoint.contains("@")
+                || containsWhitespace(endpoint)
+                || port < 1
+                || port > 65535) {
+            throw new IllegalArgumentException("invalid remembered Hub binding");
+        }
+        return new StageCoreHubCandidate(
+                normalizedHubId,
+                "StageCore Hub",
+                normalizedFingerprint,
+                normalizedPin,
+                "",
+                endpoint,
+                port);
+    }
+
+    public String baseUrl() {
+        return "https://" + resolvedHost + ":" + port;
+    }
+
     public boolean matchesBinding(String rememberedHubId, String rememberedFingerprint, String rememberedPin) {
         return hubId.equals(trim(rememberedHubId).toLowerCase(Locale.US))
                 && fingerprint.equals(trim(rememberedFingerprint))
