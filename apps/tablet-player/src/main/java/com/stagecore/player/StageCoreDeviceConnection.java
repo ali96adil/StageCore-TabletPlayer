@@ -39,11 +39,6 @@ public final class StageCoreDeviceConnection {
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final OkHttpClient websocketClient = new OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .pingInterval(10, TimeUnit.SECONDS)
-            .build();
     private final Set<String> completedCommandIds = new LinkedHashSet<>();
 
     private volatile boolean stopped;
@@ -96,16 +91,34 @@ public final class StageCoreDeviceConnection {
                     sleep(1500);
                     continue;
                 }
-                String baseUrl = secureBaseUrl(settings);
+                if (!settings.hasTrustedHub()) {
+                    lastStatus = "WAITING_FOR_HUB_TRUST";
+                    sleep(1500);
+                    continue;
+                }
+
+                StageCoreHubCandidate trustedHub = settings.trustedHubCandidate();
+                OkHttpClient trustedTransport = StageCoreHubTransport.makeClient(
+                        trustedHub.resolvedHost,
+                        trustedHub.tlsCertificateSha256);
+                String baseUrl = trustedHub.baseUrl();
+                StageCoreHubIdentityVerifier.verify(baseUrl, trustedTransport, trustedHub);
+                lastStatus = "HUB_VERIFIED";
+
                 StageCoreClient descriptor = new StageCoreClient(settings.deviceId, settings.deviceName);
-                StageCorePairingClient pairing = new StageCorePairingClient(settings.deviceId, settings.deviceName);
+                StageCorePairingClient pairing = new StageCorePairingClient(
+                        settings.deviceId,
+                        settings.deviceName,
+                        trustedTransport);
                 StageCorePairingClient.Session session;
                 try {
                     session = pairing.authenticate(baseUrl);
                 } catch (StageCorePairingClient.StageCoreAuthException authError) {
                     if (!"COMPANION_UNPAIRED".equals(authError.errorCode)) throw authError;
                     lastStatus = "PAIRING_REQUIRED";
-                    StageCorePairingClient.PairingReceipt receipt = pairing.requestPairing(baseUrl, descriptor.baselineCapabilities());
+                    StageCorePairingClient.PairingReceipt receipt = pairing.requestPairing(
+                            baseUrl,
+                            descriptor.baselineCapabilities());
                     pendingPairingCode = receipt.pairingCode;
                     showPairingCode(receipt.pairingCode);
                     while (!stopped) {
@@ -122,9 +135,17 @@ public final class StageCoreDeviceConnection {
                     session = pairing.authenticate(baseUrl);
                 }
                 lastStatus = "AUTHENTICATED";
-                connectWebSocket(baseUrl, settings, descriptor, session);
+                connectWebSocket(baseUrl, settings, descriptor, session, trustedTransport);
                 backoffMs = 1000;
                 while (!stopped && socket != null) sleep(500);
+            } catch (javax.net.ssl.SSLException tlsError) {
+                lastStatus = "TLS_IDENTITY_MISMATCH";
+                sleep(backoffMs);
+                backoffMs = Math.min(15000, backoffMs * 2);
+            } catch (StageCoreHubIdentityVerifier.HubIdentityException identityError) {
+                lastStatus = "HUB_IDENTITY_MISMATCH";
+                sleep(backoffMs);
+                backoffMs = Math.min(15000, backoffMs * 2);
             } catch (Throwable error) {
                 lastStatus = "ERROR:" + error.getClass().getSimpleName();
                 sleep(backoffMs);
@@ -133,7 +154,17 @@ public final class StageCoreDeviceConnection {
         }
     }
 
-    private void connectWebSocket(String baseUrl, AppSettings settings, StageCoreClient descriptor, StageCorePairingClient.Session session) throws Exception {
+    private void connectWebSocket(
+            String baseUrl,
+            AppSettings settings,
+            StageCoreClient descriptor,
+            StageCorePairingClient.Session session,
+            OkHttpClient trustedTransport) throws Exception {
+        OkHttpClient websocketClient = trustedTransport.newBuilder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .pingInterval(10, TimeUnit.SECONDS)
+                .build();
         String wsUrl = baseUrl.replaceFirst("^https://", "wss://") + "/api/v1/stage-devices/runtime";
         Request request = new Request.Builder()
                 .url(wsUrl)
