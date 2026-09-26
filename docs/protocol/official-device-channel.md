@@ -92,9 +92,11 @@ scope_ack_required = true
 commands_enabled = false
 ```
 
-The app compares that Project/Snapshot with its local active Tablet Manifest. A mismatch stays BLOCKER and never enables commands.
+Project and Runtime Snapshot authority come only from that Hub assignment. The app does **not** compare them with legacy `stagecore_project_id` or `runtime_snapshot_id` fields inside `tablet_manifest.json`. The local manifest remains content state only; `tablet_manifest_id` is an optional content hint and never grants show authority.
 
-On an exact match the app sends `assignment.scope_ack` for the same assignment epoch and connection generation. Only then may the Hub send:
+If the process-wide device connection reaches ACTIVE before the Android playback runtime or local manifest has finished loading, the tablet stays BLOCKER and retries the same scope acknowledgment under the exact socket, Project, Snapshot, assignment epoch and connection generation. A stale delayed retry cannot acknowledge a replacement socket or moved assignment.
+
+Once local content is ready, the app sends `assignment.scope_ack` for the Hub-owned Project/Snapshot and the same assignment epoch and connection generation. Only then may the Hub send:
 
 ```text
 runtime.ready
@@ -105,6 +107,18 @@ commands_enabled = true
 Normal `command.execute` frames are accepted only while that exact ACTIVE Project/Snapshot/epoch authority remains current.
 
 Tablet Manifest ID remains an optional content hint. It does not grant Project or Runtime Snapshot authority.
+
+## Asynchronous Live command completion
+
+`TABLET_LIVE_SHOW` may resolve its source through either a local `media_key` or a validated direct HTTP(S) `url`. Starting the network/render path returns an intermediate `command.result = ACCEPTED`; this is **not** playback success.
+
+For Live playback the tablet sends the terminal result only when:
+
+- the first Live frame has actually reached the renderer: `COMPLETED`;
+- the first-frame deadline expires: `TIMED_OUT` and the Live layer is released; or
+- an explicit `TABLET_LIVE_HIDE` cancels an in-progress first-frame wait: `CANCELLED`.
+
+Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and do not create multiple terminal command results. A socket disconnect invalidates the local pending callback; the Hub owns the interrupted-command result for that connection.
 
 ## Reconnect semantics
 
@@ -130,7 +144,7 @@ Remote pairing/runtime requires HTTPS/WSS. The Android client does not install a
 
 ## Cross-repo contract
 
-This client implementation is paired with StageCore Hub PR #297. The two PRs must be treated as one protocol change for deployment.
+Project-independent assignment is paired with StageCore Hub PR #297. Direct Live URL authoring/dispatch is paired with StageCore PR #302. These contracts must be treated together for deployment.
 
 ## Qualification
 
