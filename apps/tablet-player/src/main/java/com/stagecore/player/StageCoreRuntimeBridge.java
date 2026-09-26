@@ -6,6 +6,7 @@ import com.stagecore.player.model.TabletManifest;
 
 import org.json.JSONObject;
 
+import java.net.URI;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -110,9 +111,38 @@ public final class StageCoreRuntimeBridge {
             case "TABLET_BLACKOUT_CLEAR": return executor.clearBlackout();
             case "TABLET_OVERLAY_PLAY": return executor.playOverlay(payload.optInt("media_number", 1));
             case "TABLET_OVERLAY_CLEAR": return executor.hideOverlay(payload.optLong("dissolve_ms", 0));
-            case "TABLET_LIVE_SHOW": return executor.showLive(payload.optString("media_key", ""));
+            case "TABLET_LIVE_SHOW":
+                String mediaKey = payload.optString("media_key", "").trim();
+                String directUrl = payload.optString("url", "").trim();
+                if ((mediaKey.isEmpty()) == (directUrl.isEmpty())) {
+                    return CommandResult.rejected("LIVE_SOURCE_INVALID", "Provide exactly one of media_key or url");
+                }
+                if (!directUrl.isEmpty()) {
+                    if (!isAllowedDirectLiveUrl(directUrl)) {
+                        return CommandResult.rejected("LIVE_URL_INVALID", "Live URL must be absolute HTTP(S) without credentials");
+                    }
+                    return executor.showLiveUrl(directUrl);
+                }
+                return executor.showLive(mediaKey);
             case "TABLET_LIVE_HIDE": return executor.hideLive();
             default: return CommandResult.rejected("UNSUPPORTED_COMMAND", "Unsupported StageCore command " + commandType);
+        }
+    }
+
+    static boolean isAllowedDirectLiveUrl(String value) {
+        if (value == null) return false;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty() || trimmed.length() > 2048) return false;
+        try {
+            URI uri = new URI(trimmed);
+            String scheme = uri.getScheme();
+            return scheme != null
+                    && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    && uri.getHost() != null
+                    && !uri.getHost().trim().isEmpty()
+                    && uri.getUserInfo() == null;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
