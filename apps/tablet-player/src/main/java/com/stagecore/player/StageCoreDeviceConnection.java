@@ -273,9 +273,9 @@ public final class StageCoreDeviceConnection {
         }
 
         main.post(() -> {
-            CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, "");
-            if (scope.status != CommandStatus.COMPLETED) {
-                lastStatus = "V2_SCOPE_MISMATCH";
+            CommandResult localContent = StageCoreRuntimeBridge.validateV2ManifestHint("");
+            if (localContent.status != CommandStatus.COMPLETED) {
+                lastStatus = "V2_CONTENT_NOT_READY";
                 sendObservation(webSocket);
                 return;
             }
@@ -327,7 +327,7 @@ public final class StageCoreDeviceConnection {
                     .put("assignment_epoch", epoch)
                     .put("connection_generation", generation)
                     .put("readiness", "READY")
-                    .put("observed_state", StageCoreRuntimeBridge.observedState())
+                    .put("observed_state", StageCoreRuntimeBridge.assignedObservedState(projectId, snapshotId))
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(ack.toString());
             lastStatus = "V2_SCOPE_ACK_SENT";
@@ -368,10 +368,10 @@ public final class StageCoreDeviceConnection {
         JSONObject payload = command.optJSONObject("payload");
         String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
         main.post(() -> {
-            CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
-            CommandResult result = scope.status == CommandStatus.COMPLETED
+            CommandResult contentScope = StageCoreRuntimeBridge.validateV2ManifestHint(manifestId);
+            CommandResult result = contentScope.status == CommandStatus.COMPLETED
                     ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
-                    : scope;
+                    : contentScope;
             remember(commandId);
             sendResult(webSocket, settingsDeviceId(), commandId, result);
             sendObservation(webSocket);
@@ -407,7 +407,8 @@ public final class StageCoreDeviceConnection {
                     .put("device_id", settingsDeviceId())
                     .put("readiness", ready ? "READY" : "BLOCKER")
                     .put("observed_state", ready
-                            ? StageCoreRuntimeBridge.observedState()
+                            ? StageCoreRuntimeBridge.assignedObservedState(
+                                    assignedProjectId, assignedRuntimeSnapshotId)
                             : StageCoreRuntimeBridge.inventoryObservedState())
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(json.toString());
