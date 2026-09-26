@@ -48,6 +48,24 @@ public final class StageCoreRuntimeBridge {
         return object;
     }
 
+    /**
+     * Device-level observation used before a Hub-owned Project assignment exists.
+     * It deliberately excludes Project and Runtime Snapshot authority so a stale
+     * local manifest cannot self-assign this tablet to a show.
+     */
+    public static JSONObject inventoryObservedState() {
+        TabletManifest manifest = manifest();
+        JSONObject object = new JSONObject();
+        try {
+            object.put("player_ready", isReady());
+            object.put("local_manifest_present", manifest != null);
+            if (manifest != null) {
+                object.put("local_tablet_manifest_id", safe(manifest.tabletManifestId));
+            }
+        } catch (Exception ignored) {}
+        return object;
+    }
+
     public static CommandResult execute(String commandType, JSONObject payload) {
         ManifestExecutor executor = EXECUTOR.get();
         if (executor == null) return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
