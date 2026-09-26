@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private TextView resultDetails;
     private TextView discoveryInfo;
     private TextView brightnessLabel;
+    private TextView liveRotationLabel;
     private TextView readinessBadge;
     private View controlsPanel;
     private LinearLayout advancedDebugPanel;
@@ -82,6 +83,17 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
 
         player = new TabletPlayer(this);
+        player.setLiveStatusListener(new MjpegLiveView.Listener() {
+            @Override public void onReady() {
+                showActionResult("Test Live URL", "First live frame rendered.", "READY ✅", true);
+                pokeHeartbeat();
+            }
+            @Override public void onError(String reason) {
+                lastError = "Live: " + reason;
+                showActionResult("Test Live URL", "Live error: " + reason + "\nRetrying while Live is active.", "FAILED ❌", true);
+                pokeHeartbeat();
+            }
+        });
         manifestStore = new ManifestStore();
         mediaResolver = new MediaResolver();
         mediaResolver.ensureBaseDir();
@@ -103,6 +115,7 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         player.attachTo(root);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         addControls(root);
         addHotCorner(root);
         setContentView(root);
@@ -157,6 +170,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (heartbeatReporter != null) heartbeatReporter.stop();
+        if (player != null) player.release();
         if (oscServer != null) oscServer.stop();
         if (discovery != null) discovery.stop();
         super.onDestroy();
@@ -204,6 +218,15 @@ public final class MainActivity extends Activity {
         panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
+        liveRotationLabel = help("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        panel.addView(liveRotationLabel);
+        panel.addView(rowButtons(
+                button("0°", v -> setLiveRotation(0)),
+                button("90°", v -> setLiveRotation(90)),
+                button("180°", v -> setLiveRotation(180)),
+                button("270°", v -> setLiveRotation(270))
+        ));
+        panel.addView(help("لف الكاميرا عمودياً ثم اختر 90° أو 270° حسب اتجاهها. Fit يعرض الصورة كاملة؛ Crop يقص الحواف."));
         liveUrlInput = editText();
         liveUrlInput.setText("http://192.168.3.80:81/stream");
         panel.addView(field("Live URL", liveUrlInput));
@@ -461,6 +484,7 @@ public final class MainActivity extends Activity {
         if (keepAwakeCheck != null) keepAwakeCheck.setChecked(appSettings.keepScreenAwake);
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
+        if (liveRotationLabel != null) liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
         updateReadinessBadge();
         updateStatusHeader();
     }
@@ -481,6 +505,7 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         refreshSettingsFields();
         showActionResult("Save Settings", "تم حفظ الإعدادات.", "READY ✅", false);
         applyShowLockSurface();
@@ -493,6 +518,18 @@ public final class MainActivity extends Activity {
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         refreshSettingsFields();
         showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
+        pokeHeartbeat();
+    }
+
+    private void setLiveRotation(int degrees) {
+        appSettings.liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        appSettings.save(this);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
+        if (liveRotationLabel != null) {
+            liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        }
+        showActionResult("Live Rotation", "تم تدوير صورة Live إلى " + appSettings.liveRotationDegrees
+                + "° بدون تغيير فيديوهات MP4.", "READY ✅", false);
         pokeHeartbeat();
     }
 
@@ -605,6 +642,7 @@ public final class MainActivity extends Activity {
                 + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
+                + " | دوران Live: " + appSettings.liveRotationDegrees + "°"
                 + " | السطوع: " + appSettings.brightnessPercent + "%"
                 + "\nآخر أمر: " + lastAction + " — " + lastActionState);
     }
@@ -748,7 +786,12 @@ public final class MainActivity extends Activity {
             showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
             return;
         }
-        showResult("Test Live URL", player.showLive(url));
+        CommandResult result = player.showLive(url);
+        if (!"OK".equals(result.code)) {
+            showResult("Test Live URL", result);
+        } else {
+            showActionResult("Test Live URL", "Connecting to Live URL; waiting for first frame.", "CHECK ⚠️", true);
+        }
     }
 
     private void enterShowModeNow() {

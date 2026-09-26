@@ -24,6 +24,7 @@ public final class AppSettings {
     public boolean autoDiscover;
     public int brightnessPercent;
     public String videoScaleMode;
+    public int liveRotationDegrees;
     public String orientationMode;
     public boolean showModeOnLaunch;
     public boolean showLockEnabled;
@@ -44,6 +45,7 @@ public final class AppSettings {
         settings.autoDiscover = prefs.getBoolean("auto_discover", true);
         settings.brightnessPercent = clamp(prefs.getInt("brightness_percent", 100), 5, 100);
         settings.videoScaleMode = normalizeScale(prefs.getString("video_scale_mode", SCALE_FIT));
+        settings.liveRotationDegrees = normalizeLiveRotation(prefs.getInt("live_rotation_degrees", 0));
         settings.orientationMode = normalizeOrientation(prefs.getString("orientation_mode", ORIENTATION_AUTO));
         settings.showModeOnLaunch = prefs.getBoolean("show_mode_on_launch", true);
         settings.showLockEnabled = prefs.getBoolean("show_lock_enabled", true);
@@ -62,6 +64,7 @@ public final class AppSettings {
         serverPort = clamp(serverPort, 1, 65535);
         brightnessPercent = clamp(brightnessPercent, 5, 100);
         videoScaleMode = normalizeScale(videoScaleMode);
+        liveRotationDegrees = normalizeLiveRotation(liveRotationDegrees);
         orientationMode = normalizeOrientation(orientationMode);
         heartbeatPort = clamp(heartbeatPort, 1, 65535);
         heartbeatIntervalSeconds = clamp(heartbeatIntervalSeconds, 3, 60);
@@ -74,6 +77,7 @@ public final class AppSettings {
                 .putBoolean("auto_discover", autoDiscover)
                 .putInt("brightness_percent", brightnessPercent)
                 .putString("video_scale_mode", videoScaleMode)
+                .putInt("live_rotation_degrees", liveRotationDegrees)
                 .putString("orientation_mode", orientationMode)
                 .putBoolean("show_mode_on_launch", showModeOnLaunch)
                 .putBoolean("show_lock_enabled", showLockEnabled)
@@ -112,6 +116,10 @@ public final class AppSettings {
     private static String normalizeScale(String value) {
         if (SCALE_FULL.equals(value) || SCALE_FIT.equals(value) || SCALE_CROP.equals(value)) return value;
         return SCALE_FIT;
+    }
+
+    public static int normalizeLiveRotation(int degrees) {
+        return degrees == 90 || degrees == 180 || degrees == 270 ? degrees : 0;
     }
 
     private static String normalizeOrientation(String value) {
