@@ -32,6 +32,9 @@ import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public final class MainActivity extends Activity {
     private TabletPlayer player;
     private ManifestStore manifestStore;
@@ -42,12 +45,16 @@ public final class MainActivity extends Activity {
     private TabletHeartbeatReporter heartbeatReporter;
     private MediaResolver mediaResolver;
     private AppSettings appSettings;
+    private StageCoreHubCandidate pendingHubCandidate;
+    private boolean discoveryAmbiguous;
+    private final ExecutorService hubTrustWorker = Executors.newSingleThreadExecutor();
 
     private TextView statusHeader;
     private TextView actionResult;
     private TextView resultDetails;
     private TextView discoveryInfo;
     private TextView brightnessLabel;
+    private TextView liveRotationLabel;
     private TextView readinessBadge;
     private View controlsPanel;
     private LinearLayout advancedDebugPanel;
@@ -82,6 +89,17 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
 
         player = new TabletPlayer(this);
+        player.setLiveStatusListener(new MjpegLiveView.Listener() {
+            @Override public void onReady() {
+                showActionResult("Test Live URL", "First live frame rendered.", "READY ✅", true);
+                pokeHeartbeat();
+            }
+            @Override public void onError(String reason) {
+                lastError = "Live: " + reason;
+                showActionResult("Test Live URL", "Live error: " + reason + "\nRetrying while Live is active.", "FAILED ❌", true);
+                pokeHeartbeat();
+            }
+        });
         manifestStore = new ManifestStore();
         mediaResolver = new MediaResolver();
         mediaResolver.ensureBaseDir();
@@ -103,6 +121,7 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         player.attachTo(root);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         addControls(root);
         addHotCorner(root);
         setContentView(root);
@@ -157,8 +176,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (heartbeatReporter != null) heartbeatReporter.stop();
+        if (player != null) player.release();
         if (oscServer != null) oscServer.stop();
         if (discovery != null) discovery.stop();
+        hubTrustWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -204,6 +225,15 @@ public final class MainActivity extends Activity {
         panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
+        liveRotationLabel = help("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        panel.addView(liveRotationLabel);
+        panel.addView(rowButtons(
+                button("0°", v -> setLiveRotation(0)),
+                button("90°", v -> setLiveRotation(90)),
+                button("180°", v -> setLiveRotation(180)),
+                button("270°", v -> setLiveRotation(270))
+        ));
+        panel.addView(help("لف الكاميرا عمودياً ثم اختر 90° أو 270° حسب اتجاهها. Fit يعرض الصورة كاملة؛ Crop يقص الحواف."));
         liveUrlInput = editText();
         liveUrlInput.setText("http://192.168.3.80:81/stream");
         panel.addView(field("Live URL", liveUrlInput));
@@ -265,10 +295,11 @@ public final class MainActivity extends Activity {
         panel.addView(field("البورت", serverPortInput));
         autoDiscoverCheck = checkBox("اكتشاف تلقائي Bonjour", true);
         panel.addView(autoDiscoverCheck);
-        discoveryInfo = help("الاكتشاف يبحث عن _stagecore._tcp و _stagecore-hub._tcp داخل نفس الشبكة.");
+        discoveryInfo = help("الاكتشاف الرسمي يستخدم _stagecore-hub._tcp فقط. أول Hub يحتاج اعتماد صريح بعد تحقق TLS والهوية.");
         panel.addView(discoveryInfo);
         panel.addView(rowButtons(
-                button("بحث تلقائي", v -> startDiscovery(true)),
+                button("بحث آمن", v -> startDiscovery(true)),
+                button("اعتماد Hub المكتشف", v -> trustDiscoveredHub()),
                 button("إيقاف البحث", v -> stopDiscovery())
         ));
 
@@ -461,15 +492,22 @@ public final class MainActivity extends Activity {
         if (keepAwakeCheck != null) keepAwakeCheck.setChecked(appSettings.keepScreenAwake);
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
+        if (liveRotationLabel != null) liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
         updateReadinessBadge();
         updateStatusHeader();
     }
 
     private void saveSettingsFromFields() {
+        String previousServerHost = appSettings.serverHost;
+        int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, "");
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
+        if (!sameEndpoint(previousServerHost, previousServerPort, appSettings.serverHost, appSettings.serverPort)) {
+            appSettings.clearTrustedHub();
+            pendingHubCandidate = null;
+        }
         appSettings.autoDiscover = autoDiscoverCheck != null && autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck != null && showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck != null && showLockCheck.isChecked();
@@ -481,6 +519,7 @@ public final class MainActivity extends Activity {
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         refreshSettingsFields();
         showActionResult("Save Settings", "تم حفظ الإعدادات.", "READY ✅", false);
         applyShowLockSurface();
@@ -493,6 +532,18 @@ public final class MainActivity extends Activity {
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         refreshSettingsFields();
         showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
+        pokeHeartbeat();
+    }
+
+    private void setLiveRotation(int degrees) {
+        appSettings.liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        appSettings.save(this);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
+        if (liveRotationLabel != null) {
+            liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        }
+        showActionResult("Live Rotation", "تم تدوير صورة Live إلى " + appSettings.liveRotationDegrees
+                + "° بدون تغيير فيديوهات MP4.", "READY ✅", false);
         pokeHeartbeat();
     }
 
@@ -514,19 +565,50 @@ public final class MainActivity extends Activity {
 
     private void startDiscovery(boolean visibleFeedback) {
         saveSettingsFromFieldsWithoutRender();
-        if (visibleFeedback && discoveryInfo != null) discoveryInfo.setText("جاري البحث عن StageCore داخل الشبكة...");
-        showActionResult("Discovery", "جاري البحث عن StageCore داخل الشبكة...", "Running...", false);
+        pendingHubCandidate = null;
+        discoveryAmbiguous = false;
+        if (visibleFeedback && discoveryInfo != null) {
+            discoveryInfo.setText("جاري البحث الآمن عن StageCore Hub داخل الشبكة...");
+        }
+        showActionResult("Discovery", "جاري البحث الآمن عن StageCore Hub داخل الشبكة...", "Running...", false);
         discovery.start(new StageCoreDiscovery.Callback() {
             @Override
-            public void onFound(String name, String host, int port, String serviceType) {
-                appSettings.serverHost = host;
-                appSettings.serverPort = port > 0 ? port : appSettings.serverPort;
-                appSettings.save(MainActivity.this);
-                refreshSettingsFields();
-                String message = "تم العثور على StageCore: " + name + " — " + appSettings.serverLabel() + " — " + serviceType;
+            public void onFound(StageCoreHubCandidate candidate) {
+                if (appSettings.hasTrustedHub()) {
+                    if (!appSettings.matchesTrustedHub(candidate)) {
+                        String message = "تم تجاهل Hub لا يطابق الهوية المحفوظة: " + candidate.displayName;
+                        if (discoveryInfo != null) discoveryInfo.setText(message);
+                        showActionResult("Discovery", message, "CHECK ⚠️", true);
+                        return;
+                    }
+                    verifyRememberedHubEndpoint(candidate);
+                    return;
+                }
+
+                if (discoveryAmbiguous) {
+                    String message = "يوجد أكثر من Hub مختلف في الاكتشاف. أوقف البحث وأعده بعد تحديد Hub واحد.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                    return;
+                }
+
+                if (pendingHubCandidate != null
+                        && (!pendingHubCandidate.hubId.equals(candidate.hubId)
+                        || !pendingHubCandidate.tlsCertificateSha256.equals(candidate.tlsCertificateSha256))) {
+                    pendingHubCandidate = null;
+                    discoveryAmbiguous = true;
+                    String message = "تم العثور على أكثر من Hub مختلف. لن يتم اعتماد أي واحد تلقائياً.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                    return;
+                }
+
+                pendingHubCandidate = candidate;
+                String message = "تم العثور على Hub غير معتمد: " + candidate.displayName
+                        + " — " + candidate.resolvedHost + ":" + candidate.port
+                        + "\nاضغط «اعتماد Hub المكتشف» لإجراء تحقق TLS والهوية ثم حفظ الثقة.";
                 if (discoveryInfo != null) discoveryInfo.setText(message);
-                showActionResult("Discovery", message, "READY ✅", true);
-                pokeHeartbeat();
+                showActionResult("Discovery", message, "CHECK ⚠️", true);
             }
 
             @Override
@@ -535,6 +617,94 @@ public final class MainActivity extends Activity {
                 android.util.Log.i("StageCoreDiscovery", message);
             }
         });
+    }
+
+    private void trustDiscoveredHub() {
+        StageCoreHubCandidate candidate = pendingHubCandidate;
+        if (discoveryAmbiguous) {
+            showActionResult(
+                    "Trust Hub",
+                    "الاكتشاف يحتوي أكثر من Hub مختلف. لن يتم اعتماد أي واحد حتى تعيد البحث بمرشح واحد.",
+                    "CHECK ⚠️",
+                    true);
+            return;
+        }
+        if (candidate == null) {
+            showActionResult(
+                    "Trust Hub",
+                    "لا يوجد Hub واحد صالح بانتظار الاعتماد. شغّل البحث الآمن أولاً.",
+                    "CHECK ⚠️",
+                    true);
+            return;
+        }
+        showActionResult("Trust Hub", "جاري التحقق من TLS وهوية StageCore Hub...", "Running...", false);
+        hubTrustWorker.execute(() -> {
+            try {
+                okhttp3.OkHttpClient transport = StageCoreHubTransport.makeClient(
+                        candidate.resolvedHost,
+                        candidate.tlsCertificateSha256);
+                StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
+                runOnUiThread(() -> {
+                    if (!sameHubCandidate(pendingHubCandidate, candidate) || discoveryAmbiguous) return;
+                    appSettings.trustHub(candidate);
+                    appSettings.save(MainActivity.this);
+                    pendingHubCandidate = null;
+                    discoveryAmbiguous = false;
+                    if (discovery != null) discovery.stop();
+                    refreshSettingsFields();
+                    String message = "تم اعتماد StageCore Hub بعد تطابق TLS والهوية: "
+                            + appSettings.serverLabel();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Trust Hub", message, "READY ✅", true);
+                    pokeHeartbeat();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    String message = "فشل اعتماد Hub: " + error.getClass().getSimpleName();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Trust Hub", message, "FAILED ❌", true);
+                });
+            }
+        });
+    }
+
+    private void verifyRememberedHubEndpoint(StageCoreHubCandidate candidate) {
+        hubTrustWorker.execute(() -> {
+            try {
+                okhttp3.OkHttpClient transport = StageCoreHubTransport.makeClient(
+                        candidate.resolvedHost,
+                        candidate.tlsCertificateSha256);
+                StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
+                runOnUiThread(() -> {
+                    if (!appSettings.matchesTrustedHub(candidate)) return;
+                    appSettings.trustHub(candidate);
+                    appSettings.save(MainActivity.this);
+                    refreshSettingsFields();
+                    String message = "تم التحقق من Hub الموثوق وتحديث عنوانه: "
+                            + appSettings.serverLabel();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "READY ✅", true);
+                    pokeHeartbeat();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    String message = "تم تجاهل عنوان Hub محفوظ الهوية لأن تحقق TLS/identity فشل.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                });
+            }
+        });
+    }
+
+    private static boolean sameHubCandidate(
+            StageCoreHubCandidate first, StageCoreHubCandidate second) {
+        return first != null
+                && second != null
+                && first.hubId.equals(second.hubId)
+                && first.fingerprint.equals(second.fingerprint)
+                && first.tlsCertificateSha256.equals(second.tlsCertificateSha256)
+                && first.resolvedHost.equals(second.resolvedHost)
+                && first.port == second.port;
     }
 
     private void stopDiscovery() {
@@ -602,9 +772,11 @@ public final class MainActivity extends Activity {
         if (statusHeader == null || appSettings == null || stageCoreClient == null) return;
         statusHeader.setText("الجهاز: " + stageCoreClient.deviceName()
                 + "\nالسيرفر: " + appSettings.serverLabel()
+                + " | Hub: " + appSettings.hubTrustLabel()
                 + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
+                + " | دوران Live: " + appSettings.liveRotationDegrees + "°"
                 + " | السطوع: " + appSettings.brightnessPercent + "%"
                 + "\nآخر أمر: " + lastAction + " — " + lastActionState);
     }
@@ -687,10 +859,12 @@ public final class MainActivity extends Activity {
         String scan = compactMediaScanSummary();
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
         boolean missing = !scan.contains("النواقص: 0");
-        String status = hasPermission && !missing ? "READY ✅" : "CHECK NEEDED ⚠️";
+        String status = hasPermission && !missing && appSettings.hasTrustedHub()
+                ? "READY ✅" : "CHECK NEEDED ⚠️";
         return "فحص قبل العرض: " + status
                 + "\nالصلاحيات: " + storagePermissionState()
                 + "\nالسيرفر: " + appSettings.serverLabel()
+                + "\nHub trust: " + appSettings.hubTrustLabel()
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
                 + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
                 + "\n\n" + scan
@@ -748,7 +922,12 @@ public final class MainActivity extends Activity {
             showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
             return;
         }
-        showResult("Test Live URL", player.showLive(url));
+        CommandResult result = player.showLive(url);
+        if (!"OK".equals(result.code)) {
+            showResult("Test Live URL", result);
+        } else {
+            showActionResult("Test Live URL", "Connecting to Live URL; waiting for first frame.", "CHECK ⚠️", true);
+        }
     }
 
     private void enterShowModeNow() {
@@ -762,7 +941,7 @@ public final class MainActivity extends Activity {
         if (readinessBadge == null || mediaResolver == null || manifestStore == null || appSettings == null) return;
         String scan = mediaResolver.scanSummary(manifestStore.activeManifest());
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
-        boolean ready = hasPermission && scan.contains("النواقص: 0");
+        boolean ready = hasPermission && scan.contains("النواقص: 0") && appSettings.hasTrustedHub();
         readinessBadge.setText(ready ? "جاهزية العرض: READY ✅" : "جاهزية العرض: تحتاج فحص ⚠️");
         readinessBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
     }
@@ -818,10 +997,16 @@ public final class MainActivity extends Activity {
     }
 
     private void saveSettingsFromFieldsWithoutRender() {
+        String previousServerHost = appSettings.serverHost;
+        int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, appSettings.serverHost);
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
+        if (!sameEndpoint(previousServerHost, previousServerPort, appSettings.serverHost, appSettings.serverPort)) {
+            appSettings.clearTrustedHub();
+            pendingHubCandidate = null;
+        }
         appSettings.autoDiscover = autoDiscoverCheck == null || autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck == null || showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck == null || showLockCheck.isChecked();
@@ -843,6 +1028,12 @@ public final class MainActivity extends Activity {
         if (editText == null || editText.getText() == null) return fallback;
         String value = editText.getText().toString().trim();
         return value.isEmpty() ? fallback : value;
+    }
+
+    private static boolean sameEndpoint(String aHost, int aPort, String bHost, int bPort) {
+        String a = aHost == null ? "" : aHost.trim();
+        String b = bHost == null ? "" : bHost.trim();
+        return aPort == bPort && a.equalsIgnoreCase(b);
     }
 
     private static int parsePort(String value, int fallback) {

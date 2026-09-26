@@ -11,6 +11,10 @@ public final class CommandResult {
         this.message = message;
     }
 
+    public static CommandResult accepted(String message) {
+        return new CommandResult(CommandStatus.ACCEPTED, "OK", message);
+    }
+
     public static CommandResult completed(String message) {
         return new CommandResult(CommandStatus.COMPLETED, "OK", message);
     }
@@ -21,6 +25,14 @@ public final class CommandResult {
 
     public static CommandResult rejected(String code, String message) {
         return new CommandResult(CommandStatus.REJECTED, code, message);
+    }
+
+    public static CommandResult timedOut(String code, String message) {
+        return new CommandResult(CommandStatus.TIMED_OUT, code, message);
+    }
+
+    public static CommandResult cancelled(String code, String message) {
+        return new CommandResult(CommandStatus.CANCELLED, code, message);
     }
 
     @Override

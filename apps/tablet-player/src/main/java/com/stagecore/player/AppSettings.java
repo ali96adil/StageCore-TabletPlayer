@@ -21,9 +21,13 @@ public final class AppSettings {
     public String deviceName;
     public String serverHost;
     public int serverPort;
+    public String trustedHubId;
+    public String trustedHubFingerprint;
+    public String trustedHubTlsSha256;
     public boolean autoDiscover;
     public int brightnessPercent;
     public String videoScaleMode;
+    public int liveRotationDegrees;
     public String orientationMode;
     public boolean showModeOnLaunch;
     public boolean showLockEnabled;
@@ -41,9 +45,13 @@ public final class AppSettings {
         settings.deviceName = nonBlank(prefs.getString("device_name", null), "Tablet " + suffix(settings.deviceId));
         settings.serverHost = prefs.getString("server_host", "");
         settings.serverPort = clamp(prefs.getInt("server_port", 8080), 1, 65535);
+        settings.trustedHubId = prefs.getString("trusted_hub_id", "");
+        settings.trustedHubFingerprint = prefs.getString("trusted_hub_fingerprint", "");
+        settings.trustedHubTlsSha256 = prefs.getString("trusted_hub_tls_sha256", "");
         settings.autoDiscover = prefs.getBoolean("auto_discover", true);
         settings.brightnessPercent = clamp(prefs.getInt("brightness_percent", 100), 5, 100);
         settings.videoScaleMode = normalizeScale(prefs.getString("video_scale_mode", SCALE_FIT));
+        settings.liveRotationDegrees = normalizeLiveRotation(prefs.getInt("live_rotation_degrees", 0));
         settings.orientationMode = normalizeOrientation(prefs.getString("orientation_mode", ORIENTATION_AUTO));
         settings.showModeOnLaunch = prefs.getBoolean("show_mode_on_launch", true);
         settings.showLockEnabled = prefs.getBoolean("show_lock_enabled", true);
@@ -60,8 +68,12 @@ public final class AppSettings {
         deviceName = nonBlank(deviceName, "Tablet " + suffix(deviceId));
         serverHost = serverHost == null ? "" : serverHost.trim();
         serverPort = clamp(serverPort, 1, 65535);
+        trustedHubId = trustedHubId == null ? "" : trustedHubId.trim().toLowerCase(Locale.US);
+        trustedHubFingerprint = trustedHubFingerprint == null ? "" : trustedHubFingerprint.trim();
+        trustedHubTlsSha256 = trustedHubTlsSha256 == null ? "" : trustedHubTlsSha256.trim().toLowerCase(Locale.US);
         brightnessPercent = clamp(brightnessPercent, 5, 100);
         videoScaleMode = normalizeScale(videoScaleMode);
+        liveRotationDegrees = normalizeLiveRotation(liveRotationDegrees);
         orientationMode = normalizeOrientation(orientationMode);
         heartbeatPort = clamp(heartbeatPort, 1, 65535);
         heartbeatIntervalSeconds = clamp(heartbeatIntervalSeconds, 3, 60);
@@ -71,9 +83,13 @@ public final class AppSettings {
                 .putString("device_name", deviceName)
                 .putString("server_host", serverHost)
                 .putInt("server_port", serverPort)
+                .putString("trusted_hub_id", trustedHubId)
+                .putString("trusted_hub_fingerprint", trustedHubFingerprint)
+                .putString("trusted_hub_tls_sha256", trustedHubTlsSha256)
                 .putBoolean("auto_discover", autoDiscover)
                 .putInt("brightness_percent", brightnessPercent)
                 .putString("video_scale_mode", videoScaleMode)
+                .putInt("live_rotation_degrees", liveRotationDegrees)
                 .putString("orientation_mode", orientationMode)
                 .putBoolean("show_mode_on_launch", showModeOnLaunch)
                 .putBoolean("show_lock_enabled", showLockEnabled)
@@ -82,6 +98,51 @@ public final class AppSettings {
                 .putInt("heartbeat_port", heartbeatPort)
                 .putInt("heartbeat_interval_seconds", heartbeatIntervalSeconds)
                 .apply();
+    }
+
+    public boolean hasTrustedHub() {
+        try {
+            trustedHubCandidate();
+            return true;
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
+    }
+
+    public boolean matchesTrustedHub(StageCoreHubCandidate candidate) {
+        return candidate != null && hasTrustedHub()
+                && candidate.matchesBinding(
+                        trustedHubId,
+                        trustedHubFingerprint,
+                        trustedHubTlsSha256);
+    }
+
+    public StageCoreHubCandidate trustedHubCandidate() {
+        return StageCoreHubCandidate.remembered(
+                trustedHubId,
+                trustedHubFingerprint,
+                trustedHubTlsSha256,
+                serverHost,
+                serverPort);
+    }
+
+    public void trustHub(StageCoreHubCandidate candidate) {
+        if (candidate == null) throw new IllegalArgumentException("Hub candidate is required");
+        serverHost = candidate.resolvedHost;
+        serverPort = candidate.port;
+        trustedHubId = candidate.hubId;
+        trustedHubFingerprint = candidate.fingerprint;
+        trustedHubTlsSha256 = candidate.tlsCertificateSha256;
+    }
+
+    public void clearTrustedHub() {
+        trustedHubId = "";
+        trustedHubFingerprint = "";
+        trustedHubTlsSha256 = "";
+    }
+
+    public String hubTrustLabel() {
+        return hasTrustedHub() ? "موثوق" : "بانتظار اعتماد Hub";
     }
 
     public String serverLabel() {
@@ -112,6 +173,10 @@ public final class AppSettings {
     private static String normalizeScale(String value) {
         if (SCALE_FULL.equals(value) || SCALE_FIT.equals(value) || SCALE_CROP.equals(value)) return value;
         return SCALE_FIT;
+    }
+
+    public static int normalizeLiveRotation(int degrees) {
+        return degrees == 90 || degrees == 180 || degrees == 270 ? degrees : 0;
     }
 
     private static String normalizeOrientation(String value) {

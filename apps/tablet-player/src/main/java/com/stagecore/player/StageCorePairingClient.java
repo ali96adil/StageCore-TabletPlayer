@@ -22,11 +22,14 @@ public final class StageCorePairingClient {
     private final String deviceId;
     private final String displayName;
 
-    public StageCorePairingClient(String deviceId, String displayName) {
+    public StageCorePairingClient(String deviceId, String displayName, OkHttpClient trustedTransport) {
+        if (trustedTransport == null) {
+            throw new IllegalArgumentException("verified StageCore transport is required");
+        }
         this.deviceId = deviceId.trim();
         this.displayName = displayName == null || displayName.trim().isEmpty() ? "StageCore Tablet" : displayName.trim();
         this.identity = new StageCoreDeviceIdentity(this.deviceId);
-        this.http = new OkHttpClient.Builder()
+        this.http = trustedTransport.newBuilder()
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(8, TimeUnit.SECONDS)
                 .build();
