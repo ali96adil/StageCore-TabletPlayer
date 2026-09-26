@@ -2,6 +2,7 @@ package com.stagecore.player;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -10,7 +11,7 @@ import java.util.List;
 
 public final class StageCoreClientTest {
     @Test
-    public void advertisedCapabilitiesMatchExecutableV1Contract() {
+    public void advertisedCapabilitiesMatchExecutableMediaContract() {
         List<String> capabilities = new StageCoreClient("tablet-contract-test", "Contract Test").baselineCapabilities();
 
         assertEquals(Arrays.asList(
@@ -33,5 +34,17 @@ public final class StageCoreClientTest {
         assertFalse(capabilities.contains("tablet.media.prepare_folder"));
         assertFalse(capabilities.stream().anyMatch(value -> value.startsWith("tablet.health.")));
         assertFalse(capabilities.stream().anyMatch(value -> value.startsWith("tablet.alert.")));
+    }
+    @Test
+    public void v2HelloIsProjectIndependent() {
+        StageCoreClient client = new StageCoreClient("tablet-001", "Tablet 01");
+        String hello = client.hello();
+
+        assertTrue(hello.contains("protocol=stagecore.device/2"));
+        assertTrue(hello.contains("device_id=tablet-001"));
+        assertTrue(hello.contains("authority=HUB_OWNED_ASSIGNMENT"));
+        assertFalse(hello.contains(" project="));
+        assertFalse(hello.contains(" snapshot="));
+        assertFalse(hello.contains(" manifest="));
     }
 }
