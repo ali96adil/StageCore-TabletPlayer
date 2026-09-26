@@ -105,8 +105,17 @@ public final class ManifestExecutor {
         return player.showLive(url);
     }
 
+    public CommandResult showLiveAsync(String mediaKey, MjpegLiveView.Listener listener) {
+        String url = mediaResolver.resolveLiveUrl(activeManifest(), mediaKey);
+        return player.showLiveAsync(url, listener);
+    }
+
     public CommandResult showLiveUrl(String url) {
         return player.showLive(url);
+    }
+
+    public CommandResult showLiveUrlAsync(String url, MjpegLiveView.Listener listener) {
+        return player.showLiveAsync(url, listener);
     }
 
     public CommandResult pauseMain() { return player.pauseMain(); }
