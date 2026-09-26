@@ -153,6 +153,26 @@ public final class StageCoreRuntimeBridge {
         }
     }
 
+    public static CommandResult executeLiveAsync(JSONObject payload, MjpegLiveView.Listener listener) {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) {
+            return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
+        }
+        if (payload == null) payload = new JSONObject();
+        String mediaKey = payload.optString("media_key", "").trim();
+        String directUrl = payload.optString("url", "").trim();
+        if ((mediaKey.isEmpty()) == (directUrl.isEmpty())) {
+            return CommandResult.rejected("LIVE_SOURCE_INVALID", "Provide exactly one of media_key or url");
+        }
+        if (!directUrl.isEmpty()) {
+            if (!isAllowedDirectLiveUrl(directUrl)) {
+                return CommandResult.rejected("LIVE_URL_INVALID", "Live URL must be absolute HTTP(S) without credentials");
+            }
+            return executor.showLiveUrlAsync(directUrl, listener);
+        }
+        return executor.showLiveAsync(mediaKey, listener);
+    }
+
     static boolean isAllowedDirectLiveUrl(String value) {
         if (value == null) return false;
         String trimmed = value.trim();
