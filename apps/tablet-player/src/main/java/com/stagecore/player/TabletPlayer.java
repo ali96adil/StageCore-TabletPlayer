@@ -213,7 +213,17 @@ public final class TabletPlayer {
     }
 
     public CommandResult showLive(String url) {
-        if (url == null || url.trim().isEmpty()) return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
+        return startLive(url, null, false);
+    }
+
+    CommandResult showLiveAsync(String url, MjpegLiveView.Listener commandListener) {
+        return startLive(url, commandListener, true);
+    }
+
+    private CommandResult startLive(String url, MjpegLiveView.Listener commandListener, boolean asynchronous) {
+        if (url == null || url.trim().isEmpty()) {
+            return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
+        }
         String source = url.trim();
         hideBlackout();
         hideOverlay(0);
@@ -230,11 +240,11 @@ public final class TabletPlayer {
             mjpegLive.play(source, new MjpegLiveView.Listener() {
                 @Override public void onReady() {
                     showStatus("MJPEG live ready");
-                    if (liveStatusListener != null) liveStatusListener.onReady();
+                    notifyLiveReady(commandListener);
                 }
                 @Override public void onError(String reason) {
                     showStatus("MJPEG live: " + reason);
-                    if (liveStatusListener != null) liveStatusListener.onError(reason);
+                    notifyLiveError(commandListener, reason);
                 }
             });
         } else {
@@ -246,11 +256,27 @@ public final class TabletPlayer {
             keepControlsOnTop();
             liveVideo.prepare(Uri.parse(source), false, true, 0, () -> {
                 showStatus("Media live ready");
-                if (liveStatusListener != null) liveStatusListener.onReady();
+                notifyLiveReady(commandListener);
             });
         }
         showStatus("Live connecting: " + source);
-        return CommandResult.completed("Live connecting; waiting for first frame");
+        return asynchronous
+                ? CommandResult.accepted("Live connecting; waiting for first frame")
+                : CommandResult.completed("Live connecting; waiting for first frame");
+    }
+
+    private void notifyLiveReady(MjpegLiveView.Listener commandListener) {
+        if (liveStatusListener != null) liveStatusListener.onReady();
+        if (commandListener != null && commandListener != liveStatusListener) {
+            commandListener.onReady();
+        }
+    }
+
+    private void notifyLiveError(MjpegLiveView.Listener commandListener, String reason) {
+        if (liveStatusListener != null) liveStatusListener.onError(reason);
+        if (commandListener != null && commandListener != liveStatusListener) {
+            commandListener.onError(reason);
+        }
     }
 
     private boolean isMjpegSource(String url) {
