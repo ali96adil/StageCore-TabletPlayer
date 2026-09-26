@@ -111,8 +111,10 @@ final class MjpegLiveView extends ImageView {
             HttpURLConnection connection = null;
             try {
                 URL source = new URL(url);
-                if (!"http".equalsIgnoreCase(source.getProtocol()) || source.getUserInfo() != null) {
-                    throw new IOException("Live MJPEG requires an HTTP URL without credentials");
+                String scheme = source.getProtocol();
+                if ((!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+                        || source.getUserInfo() != null) {
+                    throw new IOException("Live MJPEG requires an HTTP(S) URL without credentials");
                 }
                 connection = (HttpURLConnection) source.openConnection();
                 activeConnection = connection;
