@@ -30,7 +30,7 @@ import okhttp3.WebSocketListener;
  * The transport is deliberately independent from legacy OSC. It authenticates
  * with the existing StageCore Companion authority, connects to the dedicated
  * Stage Device WebSocket, never replays commands after reconnect, and reports
- * results/observations using stagecore.device/1.
+ * device inventory observations using stagecore.device/2.
  */
 public final class StageCoreDeviceConnection {
     private final Context context;
@@ -47,6 +47,9 @@ public final class StageCoreDeviceConnection {
     private volatile WebSocket socket;
     private volatile String lastStatus = "IDLE";
     private volatile String pendingPairingCode = "";
+    private volatile String assignmentState = "UNKNOWN";
+    private volatile long assignmentEpoch;
+    private volatile String assignedProjectId = "";
 
     public StageCoreDeviceConnection(Context context) {
         this.context = context.getApplicationContext();
@@ -67,15 +70,14 @@ public final class StageCoreDeviceConnection {
 
     public String status() { return lastStatus; }
     public String pendingPairingCode() { return pendingPairingCode; }
+    public String assignmentState() { return assignmentState; }
+    public long assignmentEpoch() { return assignmentEpoch; }
+    public String assignedProjectId() { return assignedProjectId; }
 
     private void connectionLoop() {
         long backoffMs = 1000;
         while (!stopped) {
             try {
-                if (!StageCoreRuntimeBridge.isReady()) {
-                    sleep(500);
-                    continue;
-                }
                 AppSettings settings = AppSettings.load(context);
                 if (settings.serverHost == null || settings.serverHost.trim().isEmpty()) {
                     lastStatus = "WAITING_FOR_SERVER";
@@ -173,7 +175,6 @@ public final class StageCoreDeviceConnection {
             json.put("type", "device.hello");
             json.put("schema_version", 1);
             json.put("device_id", settings.deviceId);
-            json.put("project_id", StageCoreRuntimeBridge.projectId());
             json.put("profile_id", "stagecore.tablet-player");
             json.put("device_kind", "TABLET_PLAYER");
             json.put("display_name", settings.deviceName);
@@ -182,8 +183,8 @@ public final class StageCoreDeviceConnection {
             json.put("client_version", BuildConfig.VERSION_NAME);
             json.put("protocol_version", StageCoreClient.PROTOCOL);
             json.put("capabilities", new JSONArray(descriptor.baselineCapabilities()));
-            json.put("readiness", "READY");
-            json.put("observed_state", StageCoreRuntimeBridge.observedState());
+            json.put("readiness", "BLOCKER");
+            json.put("observed_state", StageCoreRuntimeBridge.inventoryObservedState());
             json.put("network_state", new JSONObject().put("transport", "WSS"));
         } catch (Exception ignored) {}
         return json;
@@ -193,36 +194,53 @@ public final class StageCoreDeviceConnection {
         try {
             JSONObject message = new JSONObject(raw);
             String type = message.optString("type", "");
-            if ("runtime.ready".equals(type)) {
-                lastStatus = "READY";
-                sendObservation(webSocket);
+            if ("assignment.state".equals(type)) {
+                acceptAssignmentState(webSocket, message);
+                return;
+            }
+            if ("runtime.ready".equals(type) || "command.execute".equals(type)) {
+                // This bootstrap slice has inventory authority only. Until the
+                // Hub-owned tablet assignment handshake is implemented, any
+                // runtime command path is a protocol violation and must fail closed.
+                lastStatus = "V2_RUNTIME_AUTHORITY_NOT_ACTIVE";
+                webSocket.close(1008, "tablet assignment authority is not active");
                 return;
             }
             if ("display.state".equals(type)) {
                 return; // tablet media player has no Stage Display surface.
             }
-            if (!"command.execute".equals(type)) return;
-            JSONObject command = message.getJSONObject("command");
-            String commandId = command.getString("command_id");
-            synchronized (completedCommandIds) {
-                if (completedCommandIds.contains(commandId)) return;
-            }
-            String projectId = command.optString("project_id", "");
-            String snapshotId = command.optString("runtime_snapshot_id", "");
-            JSONObject payload = command.optJSONObject("payload");
-            String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
-            main.post(() -> {
-                CommandResult scope = StageCoreRuntimeBridge.validateScope(projectId, snapshotId, manifestId);
-                CommandResult result = scope.status == CommandStatus.COMPLETED
-                        ? StageCoreRuntimeBridge.execute(command.optString("command_type", ""), payload)
-                        : scope;
-                remember(commandId);
-                sendResult(webSocket, settingsDeviceId(), commandId, result);
-                sendObservation(webSocket);
-            });
         } catch (Exception ignored) {
             lastStatus = "PROTOCOL_ERROR";
+            webSocket.close(1002, "StageCore v2 protocol error");
         }
+    }
+
+    private void acceptAssignmentState(WebSocket webSocket, JSONObject message) throws Exception {
+        if (message.optInt("schema_version", -1) != 2) {
+            throw new IllegalStateException("assignment.state schema mismatch");
+        }
+        if (!settingsDeviceId().equals(message.optString("device_id", ""))) {
+            throw new IllegalStateException("assignment.state device mismatch");
+        }
+        String state = message.optString("state", "");
+        long epoch = message.optLong("assignment_epoch", 0);
+        String projectId = message.optString("project_id", "");
+        if (epoch < 1 || (!"UNASSIGNED".equals(state) && !"BLOCKED".equals(state))) {
+            throw new IllegalStateException("unsupported assignment state");
+        }
+        if (message.optBoolean("commands_enabled", true)) {
+            throw new IllegalStateException("bootstrap assignment cannot enable commands");
+        }
+        if (("UNASSIGNED".equals(state) && !projectId.isEmpty())
+                || ("BLOCKED".equals(state) && projectId.isEmpty())) {
+            throw new IllegalStateException("assignment project invariant failed");
+        }
+
+        assignmentState = state;
+        assignmentEpoch = epoch;
+        assignedProjectId = projectId;
+        lastStatus = "V2_" + state;
+        sendObservation(webSocket);
     }
 
     private void sendResult(WebSocket webSocket, String deviceId, String commandId, CommandResult result) {
@@ -249,10 +267,10 @@ public final class StageCoreDeviceConnection {
         try {
             JSONObject json = new JSONObject()
                     .put("type", "device.observation")
-                    .put("schema_version", 1)
+                    .put("schema_version", 2)
                     .put("device_id", settingsDeviceId())
-                    .put("readiness", StageCoreRuntimeBridge.isReady() ? "READY" : "BLOCKER")
-                    .put("observed_state", StageCoreRuntimeBridge.observedState())
+                    .put("readiness", "BLOCKER")
+                    .put("observed_state", StageCoreRuntimeBridge.inventoryObservedState())
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(json.toString());
         } catch (Exception ignored) {}
