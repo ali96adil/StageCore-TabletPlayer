@@ -129,6 +129,7 @@ Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and d
 - The tablet never self-asserts a previous Project.
 - The app does not replay previously received PREPARE/PLAY/overlay/live commands.
 - A command interrupted by disconnect is not replayed onto the replacement socket.
+- `deadline_at` is rechecked on-device immediately before the queued UI/player side effect; an elapsed deadline returns `TIMED_OUT` and does not execute.
 - A pending Live command that has not produced its first frame is locally cancelled/hidden on disconnect; it cannot render later after authority changes.
 - Every replacement socket must repeat the ACTIVE scope acknowledgment before commands are enabled.
 

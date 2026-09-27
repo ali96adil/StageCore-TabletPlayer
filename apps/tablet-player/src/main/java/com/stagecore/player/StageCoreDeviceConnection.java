@@ -12,6 +12,8 @@ import com.stagecore.player.model.CommandStatus;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -560,6 +562,16 @@ public final class StageCoreDeviceConnection {
         }
         final long acceptedEpoch = assignmentEpoch;
         final long acceptedGeneration = connectionGeneration;
+        final String deadlineAt = command.optString("deadline_at", "");
+        // A malformed Hub command envelope is a protocol violation; an absent
+        // deadline remains valid because StageCore permits commands without one.
+        if (!deadlineAt.trim().isEmpty()) {
+            try {
+                Instant.parse(deadlineAt.trim());
+            } catch (DateTimeParseException invalidDeadline) {
+                throw new IllegalStateException("invalid command deadline");
+            }
+        }
         JSONObject payload = command.optJSONObject("payload");
         String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
         String commandType = command.optString("command_type", "");
@@ -583,6 +595,18 @@ public final class StageCoreDeviceConnection {
                 }
                 return;
             }
+            if (commandDeadlineExpired(deadlineAt, System.currentTimeMillis())) {
+                remember(commandId);
+                sendResult(
+                        webSocket,
+                        settingsDeviceId(),
+                        commandId,
+                        CommandResult.timedOut(
+                                "COMMAND_DEADLINE_EXPIRED",
+                                "StageCore command deadline elapsed before Tablet execution"));
+                sendObservation(webSocket);
+                return;
+            }
 
             CommandResult contentScope = StageCoreRuntimeBridge.validateV2ManifestHint(manifestId);
             if (contentScope.status != CommandStatus.COMPLETED) {
@@ -603,6 +627,18 @@ public final class StageCoreDeviceConnection {
             sendResult(webSocket, settingsDeviceId(), commandId, result);
             sendObservation(webSocket);
         });
+    }
+
+    static boolean commandDeadlineExpired(String deadlineAt, long nowEpochMillis) {
+        if (deadlineAt == null || deadlineAt.trim().isEmpty()) return false;
+        try {
+            long deadlineMillis = Instant.parse(deadlineAt.trim()).toEpochMilli();
+            return nowEpochMillis >= deadlineMillis;
+        } catch (DateTimeParseException invalidDeadline) {
+            // Parsing is validated before queueing an authenticated Hub command.
+            // Fail closed if this helper is ever called independently.
+            return true;
+        }
     }
 
     private boolean commandScopeStillCurrent(
