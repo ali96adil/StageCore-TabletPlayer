@@ -241,7 +241,15 @@ public final class MainActivity extends Activity {
 
         panel.addView(section("فحص العرض"));
         panel.addView(rowButtons(
-                button("Pre-show Check", v -> showActionResult("Pre-show Check", preShowCheckSummary(), preShowCheckSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true)),
+                button("Pre-show Check", v -> {
+                    String summary = preShowCheckSummary();
+                    boolean ready = summary.startsWith("فحص قبل العرض: READY ✅");
+                    showActionResult(
+                            "Pre-show Check",
+                            summary,
+                            ready ? "READY ✅" : "CHECK ⚠️",
+                            true);
+                }),
                 button("Reload + Scan", v -> reloadManifestAndScan()),
                 button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true))
         ));
@@ -1009,7 +1017,11 @@ public final class MainActivity extends Activity {
         String url = value(liveUrlInput, "");
         if (url.trim().isEmpty()) {
             lastError = "Live URL missing";
-            showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
+            showActionResult(
+                    "Test Live URL",
+                    "Live URL فارغ. استخدم Camera Relay مثل:\nhttp://<relay-ip>:9081/api/v0/stream",
+                    "FAILED ❌",
+                    true);
             return;
         }
         CommandResult result = player.showLive(url);
