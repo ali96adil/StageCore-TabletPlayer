@@ -251,7 +251,18 @@ public final class MainActivity extends Activity {
                             true);
                 }),
                 button("Reload + Scan", v -> reloadManifestAndScan()),
-                button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true))
+                button("Cue Preview", v -> {
+                    String preview = cuePreviewSummary();
+                    String upper = preview.toUpperCase(java.util.Locale.US);
+                    boolean valid = !preview.contains("لا يوجد manifest")
+                            && !upper.contains("MISSING KEY")
+                            && !preview.contains(" = empty");
+                    showActionResult(
+                            "Cue Preview",
+                            preview,
+                            valid ? "READY ✅" : "CHECK ⚠️",
+                            true);
+                })
         ));
         panel.addView(rowButtons(
                 button("Identify", v -> runLocalPlaybackAction("Identify", () -> player.identify())),
