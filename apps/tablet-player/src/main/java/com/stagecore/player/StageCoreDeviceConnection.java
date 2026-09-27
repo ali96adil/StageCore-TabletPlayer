@@ -306,7 +306,9 @@ public final class StageCoreDeviceConnection {
             }
 
             @Override public void onMessage(WebSocket webSocket, String text) {
-                handleMessage(webSocket, text);
+                // Preserve WebSocket message order while serializing assignment
+                // authority changes with UI-side command dispatch.
+                main.post(() -> handleMessage(webSocket, text));
             }
 
             @Override public void onClosing(WebSocket webSocket, int code, String reason) {
@@ -556,10 +558,32 @@ public final class StageCoreDeviceConnection {
         if (!assignedProjectId.equals(projectId) || !assignedRuntimeSnapshotId.equals(snapshotId)) {
             throw new IllegalStateException("command scope differs from Hub assignment");
         }
+        final long acceptedEpoch = assignmentEpoch;
+        final long acceptedGeneration = connectionGeneration;
         JSONObject payload = command.optJSONObject("payload");
         String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
         String commandType = command.optString("command_type", "");
         main.post(() -> {
+            if (!commandScopeStillCurrent(
+                    webSocket,
+                    projectId,
+                    snapshotId,
+                    acceptedEpoch,
+                    acceptedGeneration)) {
+                remember(commandId);
+                if (socket == webSocket) {
+                    sendResult(
+                            webSocket,
+                            settingsDeviceId(),
+                            commandId,
+                            CommandResult.cancelled(
+                                    "COMMAND_SCOPE_CHANGED",
+                                    "Tablet assignment/runtime authority changed before execution"));
+                    sendObservation(webSocket);
+                }
+                return;
+            }
+
             CommandResult contentScope = StageCoreRuntimeBridge.validateV2ManifestHint(manifestId);
             if (contentScope.status != CommandStatus.COMPLETED) {
                 remember(commandId);
@@ -579,6 +603,47 @@ public final class StageCoreDeviceConnection {
             sendResult(webSocket, settingsDeviceId(), commandId, result);
             sendObservation(webSocket);
         });
+    }
+
+    private boolean commandScopeStillCurrent(
+            WebSocket webSocket,
+            String projectId,
+            String snapshotId,
+            long epoch,
+            long generation) {
+        return socket == webSocket
+                && commandScopeMatches(
+                        runtimeAuthorityReady,
+                        assignmentState,
+                        assignmentEpoch,
+                        connectionGeneration,
+                        assignedProjectId,
+                        assignedRuntimeSnapshotId,
+                        projectId,
+                        snapshotId,
+                        epoch,
+                        generation);
+    }
+
+    static boolean commandScopeMatches(
+            boolean runtimeReady,
+            String state,
+            long currentEpoch,
+            long currentGeneration,
+            String currentProjectId,
+            String currentSnapshotId,
+            String expectedProjectId,
+            String expectedSnapshotId,
+            long expectedEpoch,
+            long expectedGeneration) {
+        return runtimeReady
+                && "ACTIVE".equals(state)
+                && currentEpoch == expectedEpoch
+                && currentGeneration == expectedGeneration
+                && currentProjectId != null
+                && currentProjectId.equals(expectedProjectId)
+                && currentSnapshotId != null
+                && currentSnapshotId.equals(expectedSnapshotId);
     }
 
     private boolean isPendingLiveCommand(String commandId) {
