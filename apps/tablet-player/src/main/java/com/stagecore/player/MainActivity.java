@@ -907,7 +907,7 @@ public final class MainActivity extends Activity {
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + "\nHub trust: " + appSettings.hubTrustLabel()
                 + "\nStageCore runtime: " + runtimeStatus
-                + "\nAssignment: " + assignmentSummary(connection)
+                + "\n" + assignmentSummary(connection)
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
                 + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
                 + "\n\n" + scan
