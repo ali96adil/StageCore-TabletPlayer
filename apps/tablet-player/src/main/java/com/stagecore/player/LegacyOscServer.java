@@ -18,7 +18,7 @@ import java.util.function.BooleanSupplier;
 public final class LegacyOscServer {
     private final ManifestExecutor executor;
     private final TabletPlayer player;
-    private final BooleanSupplier stageCoreAuthorityActive;
+    private final BooleanSupplier legacyOscBlocked;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private DatagramSocket socket;
     private Thread thread;
@@ -32,11 +32,11 @@ public final class LegacyOscServer {
     public LegacyOscServer(
             ManifestExecutor executor,
             TabletPlayer player,
-            BooleanSupplier stageCoreAuthorityActive) {
+            BooleanSupplier legacyOscBlocked) {
         this.executor = executor;
         this.player = player;
-        this.stageCoreAuthorityActive =
-                stageCoreAuthorityActive == null ? () -> false : stageCoreAuthorityActive;
+        this.legacyOscBlocked =
+                legacyOscBlocked == null ? () -> false : legacyOscBlocked;
     }
 
     public void start(int port) {
@@ -68,10 +68,10 @@ public final class LegacyOscServer {
 
     private void dispatch(OscMessage message) {
         if (message.address == null) return;
-        if (!legacyOscAllowed(stageCoreAuthorityActive.getAsBoolean())) {
+        if (!legacyOscAllowed(legacyOscBlocked.getAsBoolean())) {
             android.util.Log.w(
                     "StageCorePlayer",
-                    "Legacy OSC ignored while authenticated StageCore runtime owns playback: "
+                    "Legacy OSC ignored while StageCore trust/runtime authority blocks remote fallback: "
                             + message.address);
             return;
         }

@@ -151,7 +151,7 @@ public final class MainActivity extends Activity {
         setContentView(root);
 
         loadExternalOrSample();
-        oscServer = new LegacyOscServer(executor, player, this::stageCoreOwnsPlayback);
+        oscServer = new LegacyOscServer(executor, player, this::legacyOscBlocked);
         oscServer.start(9000);
         refreshSettingsFields();
         showActionResult("Startup", "جاهز للعرض.", "READY ✅", false);
@@ -808,6 +808,14 @@ public final class MainActivity extends Activity {
     private boolean stageCoreOwnsPlayback() {
         StageCoreDeviceConnection connection = officialDeviceConnection();
         return connection != null && connection.ownsPlaybackAuthority();
+    }
+
+    private boolean legacyOscBlocked() {
+        // Once this tablet has explicitly trusted a StageCore Hub, a runtime
+        // outage must not hand remote playback authority to unauthenticated
+        // legacy UDP OSC. Local on-device recovery controls remain separate.
+        AppSettings persisted = AppSettings.load(this);
+        return stageCoreOwnsPlayback() || (persisted != null && persisted.hasTrustedHub());
     }
 
     private CommandResult localPlaybackAuthorityRejected() {
