@@ -32,16 +32,11 @@ public final class StageCoreRuntimeBridgeTest {
         assertFalse(StageCoreRuntimeBridge.isAllowedDirectLiveUrl(""));
     }
     @Test
-    public void mediaSelectorMustBeExclusive() throws Exception {
-        org.json.JSONObject one = new org.json.JSONObject().put("tablet_sequence", 3);
-        org.json.JSONObject none = new org.json.JSONObject();
-        org.json.JSONObject many = new org.json.JSONObject()
-                .put("tablet_cue_id", "cue-1")
-                .put("media_number", 1);
-
-        assertTrue(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(one));
-        assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(none));
-        assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(many));
+    public void mediaSelectorMustBeExclusive() {
+        assertTrue(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(false, true, false));
+        assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(false, false, false));
+        assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(true, false, true));
+        assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(true, true, true));
     }
 
 }

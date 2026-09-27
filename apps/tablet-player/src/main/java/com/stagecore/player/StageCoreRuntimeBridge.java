@@ -122,7 +122,10 @@ public final class StageCoreRuntimeBridge {
         if (payload == null) payload = new JSONObject();
         switch (commandType) {
             case "TABLET_PREPARE":
-                if (!hasExactlyOneMediaSelector(payload)) {
+                if (!hasExactlyOneMediaSelector(
+                        payload.has("tablet_cue_id"),
+                        payload.has("tablet_sequence"),
+                        payload.has("media_number"))) {
                     return CommandResult.rejected(
                             "MEDIA_SELECTOR_AMBIGUOUS",
                             "TABLET_PREPARE requires exactly one of tablet_cue_id, tablet_sequence, or media_number");
@@ -149,7 +152,10 @@ public final class StageCoreRuntimeBridge {
                         "MEDIA_SELECTOR_REQUIRED",
                         "TABLET_PREPARE requires tablet_cue_id, tablet_sequence, or media_number");
             case "TABLET_PLAY":
-                if (!hasExactlyOneMediaSelector(payload)) {
+                if (!hasExactlyOneMediaSelector(
+                        payload.has("tablet_cue_id"),
+                        payload.has("tablet_sequence"),
+                        payload.has("media_number"))) {
                     return CommandResult.rejected(
                             "MEDIA_SELECTOR_AMBIGUOUS",
                             "TABLET_PLAY requires exactly one of tablet_cue_id, tablet_sequence, or media_number");
@@ -228,12 +234,14 @@ public final class StageCoreRuntimeBridge {
         return executor.showLiveAsync(mediaKey, listener);
     }
 
-    static boolean hasExactlyOneMediaSelector(JSONObject payload) {
-        if (payload == null) return false;
+    static boolean hasExactlyOneMediaSelector(
+            boolean hasCueId,
+            boolean hasSequence,
+            boolean hasMediaNumber) {
         int count = 0;
-        if (payload.has("tablet_cue_id")) count++;
-        if (payload.has("tablet_sequence")) count++;
-        if (payload.has("media_number")) count++;
+        if (hasCueId) count++;
+        if (hasSequence) count++;
+        if (hasMediaNumber) count++;
         return count == 1;
     }
 
