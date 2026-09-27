@@ -448,13 +448,12 @@ public final class StageCoreDeviceConnection {
 
         if ("UNASSIGNED".equals(state)) {
             if (message.optBoolean("safe_media_required", false) && StageCoreRuntimeBridge.isReady()) {
-                main.post(() -> {
-                    StageCoreRuntimeBridge.enterAssignmentSafeState();
-                    sendObservation(webSocket);
-                });
-            } else {
-                sendObservation(webSocket);
+                // handleMessage is already serialized on the main thread.
+                // Enter safe media in the same authority turn so a later
+                // replacement socket cannot be affected by stale queued work.
+                StageCoreRuntimeBridge.enterAssignmentSafeState();
             }
+            sendObservation(webSocket);
             return;
         }
 
@@ -501,26 +500,33 @@ public final class StageCoreDeviceConnection {
             throw new IllegalStateException("tablet assignment prepare mismatch");
         }
         runtimeAuthorityReady = false;
-        main.post(() -> {
-            CommandResult safe = StageCoreRuntimeBridge.enterAssignmentSafeState();
-            boolean ok = safe.status == CommandStatus.COMPLETED;
-            try {
-                JSONObject ack = new JSONObject()
-                        .put("type", "tablet.assignment.safe_ack")
-                        .put("schema_version", 2)
-                        .put("device_id", deviceIdForSocket(webSocket))
-                        .put("assignment_id", assignmentId)
-                        .put("assignment_epoch", epoch)
-                        .put("connection_generation", generation)
-                        .put("challenge", challenge)
-                        .put("safe_media", ok);
-                webSocket.send(ack.toString());
-                lastStatus = ok ? "V2_ASSIGNMENT_SAFE" : "V2_ASSIGNMENT_SAFE_FAILED";
-            } catch (Exception ignored) {
-                lastStatus = "PROTOCOL_ERROR";
-                webSocket.close(1002, "unable to acknowledge safe media");
+        // Runtime messages are serialized on main. Perform safe-media and ACK
+        // in this same authority turn instead of queueing work that could run
+        // after a socket/Project transition.
+        CommandResult safe = StageCoreRuntimeBridge.enterAssignmentSafeState();
+        boolean ok = safe.status == CommandStatus.COMPLETED;
+        try {
+            String deviceId = deviceIdForSocket(webSocket);
+            if (deviceId.isEmpty()
+                    || assignmentEpoch != epoch
+                    || connectionGeneration != generation) {
+                return;
             }
-        });
+            JSONObject ack = new JSONObject()
+                    .put("type", "tablet.assignment.safe_ack")
+                    .put("schema_version", 2)
+                    .put("device_id", deviceId)
+                    .put("assignment_id", assignmentId)
+                    .put("assignment_epoch", epoch)
+                    .put("connection_generation", generation)
+                    .put("challenge", challenge)
+                    .put("safe_media", ok);
+            webSocket.send(ack.toString());
+            lastStatus = ok ? "V2_ASSIGNMENT_SAFE" : "V2_ASSIGNMENT_SAFE_FAILED";
+        } catch (Exception ignored) {
+            lastStatus = "PROTOCOL_ERROR";
+            webSocket.close(1002, "unable to acknowledge safe media");
+        }
     }
 
     private void sendScopeAck(WebSocket webSocket, String projectId, String snapshotId, long epoch, long generation) {
