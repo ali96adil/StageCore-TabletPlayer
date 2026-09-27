@@ -48,6 +48,7 @@ public final class StageCoreDeviceConnection {
 
     private volatile boolean stopped;
     private volatile WebSocket socket;
+    private volatile String socketDeviceId = "";
     private volatile String lastStatus = "IDLE";
     private volatile String pendingPairingCode = "";
     private volatile String assignmentState = "UNKNOWN";
@@ -298,6 +299,7 @@ public final class StageCoreDeviceConnection {
         WebSocket ws = websocketClient.newWebSocket(request, new WebSocketListener() {
             @Override public void onOpen(WebSocket webSocket, Response response) {
                 socket = webSocket;
+                socketDeviceId = settings.deviceId;
                 lastStatus = "CONNECTED";
                 JSONObject hello = hello(settings, descriptor);
                 webSocket.send(hello.toString());
@@ -318,13 +320,19 @@ public final class StageCoreDeviceConnection {
             }
 
             @Override public void onClosed(WebSocket webSocket, int code, String reason) {
-                if (socket == webSocket) socket = null;
+                if (socket == webSocket) {
+                    socket = null;
+                    socketDeviceId = "";
+                }
                 invalidatePendingLiveCommand(webSocket);
                 clearRuntimeScope("DISCONNECTED");
             }
 
             @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                if (socket == webSocket) socket = null;
+                if (socket == webSocket) {
+                    socket = null;
+                    socketDeviceId = "";
+                }
                 invalidatePendingLiveCommand(webSocket);
                 clearRuntimeScope("DISCONNECTED:" + t.getClass().getSimpleName());
                 synchronized (openedLock) { openedLock.notifyAll(); }
@@ -372,9 +380,11 @@ public final class StageCoreDeviceConnection {
 
     private void handleMessage(WebSocket webSocket, String raw) {
         try {
+            String authenticatedDeviceId = deviceIdForSocket(webSocket);
+            if (authenticatedDeviceId.isEmpty()) return;
             JSONObject message = new JSONObject(raw);
             if (message.optInt("schema_version", -1) != 2
-                    || !settingsDeviceId().equals(message.optString("device_id", ""))) {
+                    || !authenticatedDeviceId.equals(message.optString("device_id", ""))) {
                 throw new IllegalStateException("StageCore v2 envelope mismatch");
             }
             String type = message.optString("type", "");
@@ -494,7 +504,7 @@ public final class StageCoreDeviceConnection {
                 JSONObject ack = new JSONObject()
                         .put("type", "tablet.assignment.safe_ack")
                         .put("schema_version", 2)
-                        .put("device_id", settingsDeviceId())
+                        .put("device_id", deviceIdForSocket(webSocket))
                         .put("assignment_id", assignmentId)
                         .put("assignment_epoch", epoch)
                         .put("connection_generation", generation)
@@ -514,7 +524,7 @@ public final class StageCoreDeviceConnection {
             JSONObject ack = new JSONObject()
                     .put("type", "assignment.scope_ack")
                     .put("schema_version", 2)
-                    .put("device_id", settingsDeviceId())
+                    .put("device_id", deviceIdForSocket(webSocket))
                     .put("project_id", projectId)
                     .put("runtime_snapshot_id", snapshotId)
                     .put("assignment_epoch", epoch)
@@ -584,10 +594,7 @@ public final class StageCoreDeviceConnection {
                     acceptedGeneration)) {
                 remember(commandId);
                 if (socket == webSocket) {
-                    sendResult(
-                            webSocket,
-                            settingsDeviceId(),
-                            commandId,
+                    sendResult(webSocket, commandId,
                             CommandResult.cancelled(
                                     "COMMAND_SCOPE_CHANGED",
                                     "Tablet assignment/runtime authority changed before execution"));
@@ -597,10 +604,7 @@ public final class StageCoreDeviceConnection {
             }
             if (commandDeadlineExpired(deadlineAt, System.currentTimeMillis())) {
                 remember(commandId);
-                sendResult(
-                        webSocket,
-                        settingsDeviceId(),
-                        commandId,
+                sendResult(webSocket, commandId,
                         CommandResult.timedOut(
                                 "COMMAND_DEADLINE_EXPIRED",
                                 "StageCore command deadline elapsed before Tablet execution"));
@@ -611,7 +615,7 @@ public final class StageCoreDeviceConnection {
             CommandResult contentScope = StageCoreRuntimeBridge.validateV2ManifestHint(manifestId);
             if (contentScope.status != CommandStatus.COMPLETED) {
                 remember(commandId);
-                sendResult(webSocket, settingsDeviceId(), commandId, contentScope);
+                sendResult(webSocket, commandId, contentScope);
                 sendObservation(webSocket);
                 return;
             }
@@ -624,7 +628,7 @@ public final class StageCoreDeviceConnection {
             }
             CommandResult result = StageCoreRuntimeBridge.execute(commandType, payload);
             remember(commandId);
-            sendResult(webSocket, settingsDeviceId(), commandId, result);
+            sendResult(webSocket, commandId, result);
             sendObservation(webSocket);
         });
     }
@@ -693,7 +697,7 @@ public final class StageCoreDeviceConnection {
         synchronized (pendingLiveLock) {
             if (!pendingLiveCommandId.isEmpty()) {
                 remember(commandId);
-                sendResult(webSocket, settingsDeviceId(), commandId,
+                sendResult(webSocket, commandId,
                         CommandResult.rejected(
                                 "LIVE_ALREADY_CONNECTING",
                                 "Another live source is still waiting for its first frame"));
@@ -725,12 +729,12 @@ public final class StageCoreDeviceConnection {
         if (started.status != CommandStatus.ACCEPTED) {
             clearPendingLiveCommand(webSocket, commandId, token);
             remember(commandId);
-            sendResult(webSocket, settingsDeviceId(), commandId, started);
+            sendResult(webSocket, commandId, started);
             sendObservation(webSocket);
             return;
         }
 
-        sendResult(webSocket, settingsDeviceId(), commandId, started);
+        sendResult(webSocket, commandId, started);
         main.postDelayed(
                 () -> finishLiveCommand(
                         webSocket,
@@ -754,7 +758,7 @@ public final class StageCoreDeviceConnection {
             StageCoreRuntimeBridge.execute("TABLET_LIVE_HIDE", new JSONObject());
         }
         remember(commandId);
-        sendResult(webSocket, settingsDeviceId(), commandId, terminal);
+        sendResult(webSocket, commandId, terminal);
         sendObservation(webSocket);
     }
 
@@ -806,7 +810,9 @@ public final class StageCoreDeviceConnection {
         }
     }
 
-    private void sendResult(WebSocket webSocket, String deviceId, String commandId, CommandResult result) {
+    private void sendResult(WebSocket webSocket, String commandId, CommandResult result) {
+        String deviceId = deviceIdForSocket(webSocket);
+        if (deviceId.isEmpty()) return;
         try {
             JSONObject json = new JSONObject()
                     .put("type", "command.result")
@@ -831,12 +837,14 @@ public final class StageCoreDeviceConnection {
     }
 
     private void sendObservation(WebSocket webSocket) {
+        String deviceId = deviceIdForSocket(webSocket);
+        if (deviceId.isEmpty()) return;
         try {
             boolean ready = runtimeAuthorityReady && "ACTIVE".equals(assignmentState);
             JSONObject json = new JSONObject()
                     .put("type", "device.observation")
                     .put("schema_version", 2)
-                    .put("device_id", settingsDeviceId())
+                    .put("device_id", deviceId)
                     .put("readiness", ready ? "READY" : "BLOCKER")
                     .put("observed_state", ready
                             ? StageCoreRuntimeBridge.assignedObservedState(
@@ -847,7 +855,11 @@ public final class StageCoreDeviceConnection {
         } catch (Exception ignored) {}
     }
 
-    private String settingsDeviceId() { return AppSettings.load(context).deviceId; }
+    private String deviceIdForSocket(WebSocket webSocket) {
+        if (webSocket == null || socket != webSocket) return "";
+        String value = socketDeviceId;
+        return value == null ? "" : value.trim();
+    }
 
     private void remember(String commandId) {
         synchronized (completedCommandIds) {
