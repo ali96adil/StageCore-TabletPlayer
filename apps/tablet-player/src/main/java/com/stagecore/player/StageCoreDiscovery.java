@@ -72,7 +72,10 @@ public final class StageCoreDiscovery {
                 if (!running) return;
                 String type = serviceInfo.getServiceType();
                 if (!StageCoreHubCandidate.isSupportedServiceType(type)) return;
-                resolve(serviceInfo, callback);
+                // Android NSD may normalize the service type again on the resolved
+                // NsdServiceInfo. Carry forward the already validated discovery type
+                // rather than treating that platform formatting change as new trust input.
+                resolve(serviceInfo, type, callback);
             }
 
             @Override public void onServiceLost(NsdServiceInfo serviceInfo) {
@@ -93,7 +96,10 @@ public final class StageCoreDiscovery {
         };
     }
 
-    private void resolve(NsdServiceInfo serviceInfo, Callback callback) {
+    private void resolve(
+            NsdServiceInfo serviceInfo,
+            String validatedServiceType,
+            Callback callback) {
         try {
             nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
                 @Override public void onResolveFailed(NsdServiceInfo serviceInfo, int errorCode) {
@@ -112,7 +118,7 @@ public final class StageCoreDiscovery {
                                 decodeTxt(resolved.getAttributes()),
                                 host.getHostAddress(),
                                 resolved.getPort(),
-                                resolved.getServiceType());
+                                validatedServiceType);
                         mainHandler.post(() -> callback.onFound(candidate));
                     } catch (IllegalArgumentException error) {
                         status(callback, "تم تجاهل إعلان StageCore غير صالح: " + error.getMessage());
