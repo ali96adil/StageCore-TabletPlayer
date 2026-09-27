@@ -10,6 +10,7 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class StageCoreDiscovery {
     public interface Callback {
@@ -24,6 +25,7 @@ public final class StageCoreDiscovery {
     private final NsdManager nsdManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final java.util.List<NsdManager.DiscoveryListener> listeners = new java.util.ArrayList<>();
+    private final AtomicLong discoveryGeneration = new AtomicLong();
     private volatile boolean running = false;
 
     public StageCoreDiscovery(Context context) {
@@ -37,20 +39,25 @@ public final class StageCoreDiscovery {
             status(callback, "خدمة الاكتشاف التلقائي غير متوفرة بهذا الجهاز");
             return;
         }
+        final long generation = discoveryGeneration.incrementAndGet();
         running = true;
         for (String serviceType : SERVICE_TYPES) {
-            NsdManager.DiscoveryListener listener = listenerFor(serviceType, callback);
+            NsdManager.DiscoveryListener listener = listenerFor(serviceType, callback, generation);
             listeners.add(listener);
             try {
                 nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, listener);
             } catch (IllegalArgumentException | IllegalStateException ex) {
-                status(callback, "تعذر بدء البحث عن " + serviceType + ": " + ex.getMessage());
+                statusIfCurrent(
+                        callback,
+                        generation,
+                        "تعذر بدء البحث عن " + serviceType + ": " + ex.getMessage());
             }
         }
     }
 
     public void stop() {
         running = false;
+        discoveryGeneration.incrementAndGet();
         if (nsdManager == null) return;
         for (NsdManager.DiscoveryListener listener : new java.util.ArrayList<>(listeners)) {
             try {
@@ -62,36 +69,48 @@ public final class StageCoreDiscovery {
         listeners.clear();
     }
 
-    private NsdManager.DiscoveryListener listenerFor(String serviceType, Callback callback) {
+    private NsdManager.DiscoveryListener listenerFor(
+            String serviceType,
+            Callback callback,
+            long generation) {
         return new NsdManager.DiscoveryListener() {
             @Override public void onDiscoveryStarted(String regType) {
-                status(callback, "جاري البحث الآمن عن StageCore عبر Bonjour");
+                statusIfCurrent(callback, generation, "جاري البحث الآمن عن StageCore عبر Bonjour");
             }
 
             @Override public void onServiceFound(NsdServiceInfo serviceInfo) {
-                if (!running) return;
+                if (!isCurrent(generation)) return;
                 String type = serviceInfo.getServiceType();
                 if (!StageCoreHubCandidate.isSupportedServiceType(type)) return;
                 // Android NSD may normalize the service type again on the resolved
                 // NsdServiceInfo. Carry forward the already validated discovery type
                 // rather than treating that platform formatting change as new trust input.
-                resolve(serviceInfo, type, callback);
+                resolve(serviceInfo, type, callback, generation);
             }
 
             @Override public void onServiceLost(NsdServiceInfo serviceInfo) {
-                status(callback, "اختفى StageCore Hub: " + serviceInfo.getServiceName());
+                statusIfCurrent(
+                        callback,
+                        generation,
+                        "اختفى StageCore Hub: " + serviceInfo.getServiceName());
             }
 
             @Override public void onDiscoveryStopped(String serviceType) {
-                status(callback, "توقف البحث التلقائي");
+                statusIfCurrent(callback, generation, "توقف البحث التلقائي");
             }
 
             @Override public void onStartDiscoveryFailed(String serviceType, int errorCode) {
-                status(callback, "فشل بدء البحث: " + serviceType + " code=" + errorCode);
+                statusIfCurrent(
+                        callback,
+                        generation,
+                        "فشل بدء البحث: " + serviceType + " code=" + errorCode);
             }
 
             @Override public void onStopDiscoveryFailed(String serviceType, int errorCode) {
-                status(callback, "فشل إيقاف البحث: " + serviceType + " code=" + errorCode);
+                statusIfCurrent(
+                        callback,
+                        generation,
+                        "فشل إيقاف البحث: " + serviceType + " code=" + errorCode);
             }
         };
     }
@@ -99,18 +118,26 @@ public final class StageCoreDiscovery {
     private void resolve(
             NsdServiceInfo serviceInfo,
             String validatedServiceType,
-            Callback callback) {
+            Callback callback,
+            long generation) {
         try {
             nsdManager.resolveService(serviceInfo, new NsdManager.ResolveListener() {
                 @Override public void onResolveFailed(NsdServiceInfo serviceInfo, int errorCode) {
-                    status(callback, "تعذر قراءة عنوان StageCore Hub: "
-                            + serviceInfo.getServiceName() + " code=" + errorCode);
+                    statusIfCurrent(
+                            callback,
+                            generation,
+                            "تعذر قراءة عنوان StageCore Hub: "
+                                    + serviceInfo.getServiceName() + " code=" + errorCode);
                 }
 
                 @Override public void onServiceResolved(NsdServiceInfo resolved) {
+                    if (!isCurrent(generation)) return;
                     InetAddress host = resolved.getHost();
                     if (host == null) {
-                        status(callback, "تم العثور على StageCore Hub بدون عنوان IP واضح");
+                        statusIfCurrent(
+                                callback,
+                                generation,
+                                "تم العثور على StageCore Hub بدون عنوان IP واضح");
                         return;
                     }
                     try {
@@ -119,14 +146,22 @@ public final class StageCoreDiscovery {
                                 host.getHostAddress(),
                                 resolved.getPort(),
                                 validatedServiceType);
-                        mainHandler.post(() -> callback.onFound(candidate));
+                        mainHandler.post(() -> {
+                            if (isCurrent(generation)) callback.onFound(candidate);
+                        });
                     } catch (IllegalArgumentException error) {
-                        status(callback, "تم تجاهل إعلان StageCore غير صالح: " + error.getMessage());
+                        statusIfCurrent(
+                                callback,
+                                generation,
+                                "تم تجاهل إعلان StageCore غير صالح: " + error.getMessage());
                     }
                 }
             });
         } catch (IllegalArgumentException | IllegalStateException ex) {
-            status(callback, "تعذر حل عنوان StageCore Hub: " + ex.getMessage());
+            statusIfCurrent(
+                    callback,
+                    generation,
+                    "تعذر حل عنوان StageCore Hub: " + ex.getMessage());
         }
     }
 
@@ -138,6 +173,17 @@ public final class StageCoreDiscovery {
             txt.put(entry.getKey(), new String(entry.getValue(), StandardCharsets.UTF_8));
         }
         return txt;
+    }
+
+    private boolean isCurrent(long generation) {
+        return running && discoveryGeneration.get() == generation;
+    }
+
+    private void statusIfCurrent(Callback callback, long generation, String message) {
+        if (callback == null || !isCurrent(generation)) return;
+        mainHandler.post(() -> {
+            if (isCurrent(generation)) callback.onStatus(message);
+        });
     }
 
     private void status(Callback callback, String message) {
