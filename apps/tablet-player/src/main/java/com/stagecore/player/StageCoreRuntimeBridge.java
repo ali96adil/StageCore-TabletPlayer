@@ -122,18 +122,63 @@ public final class StageCoreRuntimeBridge {
         if (payload == null) payload = new JSONObject();
         switch (commandType) {
             case "TABLET_PREPARE":
-                if (payload.has("tablet_cue_id")) return executor.prepareCueById(payload.optString("tablet_cue_id"));
-                if (payload.has("tablet_sequence")) return executor.prepareCue(payload.optInt("tablet_sequence", -1));
-                return executor.prepareMain(payload.optInt("media_number", 1));
+                if (payload.has("tablet_cue_id")) {
+                    String cueId = payload.optString("tablet_cue_id", "").trim();
+                    return cueId.isEmpty()
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "tablet_cue_id must not be blank")
+                            : executor.prepareCueById(cueId);
+                }
+                if (payload.has("tablet_sequence")) {
+                    int sequence = payload.optInt("tablet_sequence", -1);
+                    return sequence < 1
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "tablet_sequence must be positive")
+                            : executor.prepareCue(sequence);
+                }
+                if (payload.has("media_number")) {
+                    int mediaNumber = payload.optInt("media_number", -1);
+                    return mediaNumber < 1
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "media_number must be positive")
+                            : executor.prepareMain(mediaNumber);
+                }
+                return CommandResult.rejected(
+                        "MEDIA_SELECTOR_REQUIRED",
+                        "TABLET_PREPARE requires tablet_cue_id, tablet_sequence, or media_number");
             case "TABLET_PLAY":
-                if (payload.has("tablet_cue_id")) return executor.goCueById(payload.optString("tablet_cue_id"));
-                if (payload.has("tablet_sequence")) return executor.goCue(payload.optInt("tablet_sequence", -1));
-                return executor.playMain(payload.optInt("media_number", 1));
+                if (payload.has("tablet_cue_id")) {
+                    String cueId = payload.optString("tablet_cue_id", "").trim();
+                    return cueId.isEmpty()
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "tablet_cue_id must not be blank")
+                            : executor.goCueById(cueId);
+                }
+                if (payload.has("tablet_sequence")) {
+                    int sequence = payload.optInt("tablet_sequence", -1);
+                    return sequence < 1
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "tablet_sequence must be positive")
+                            : executor.goCue(sequence);
+                }
+                if (payload.has("media_number")) {
+                    int mediaNumber = payload.optInt("media_number", -1);
+                    return mediaNumber < 1
+                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "media_number must be positive")
+                            : executor.playMain(mediaNumber);
+                }
+                return CommandResult.rejected(
+                        "MEDIA_SELECTOR_REQUIRED",
+                        "TABLET_PLAY requires tablet_cue_id, tablet_sequence, or media_number");
             case "TABLET_PAUSE": return executor.pauseMain();
             case "TABLET_STOP": return executor.stopMain();
             case "TABLET_BLACKOUT": return executor.blackout();
             case "TABLET_BLACKOUT_CLEAR": return executor.clearBlackout();
-            case "TABLET_OVERLAY_PLAY": return executor.playOverlay(payload.optInt("media_number", 1));
+            case "TABLET_OVERLAY_PLAY":
+                if (!payload.has("media_number")) {
+                    return CommandResult.rejected(
+                            "MEDIA_SELECTOR_REQUIRED",
+                            "TABLET_OVERLAY_PLAY requires media_number");
+                }
+                int overlayMediaNumber = payload.optInt("media_number", -1);
+                return overlayMediaNumber < 1
+                        ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "media_number must be positive")
+                        : executor.playOverlay(overlayMediaNumber);
             case "TABLET_OVERLAY_CLEAR": return executor.hideOverlay(payload.optLong("dissolve_ms", 0));
             case "TABLET_LIVE_SHOW":
                 String mediaKey = payload.optString("media_key", "").trim();
