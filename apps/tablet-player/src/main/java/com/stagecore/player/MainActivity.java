@@ -151,7 +151,7 @@ public final class MainActivity extends Activity {
         setContentView(root);
 
         loadExternalOrSample();
-        oscServer = new LegacyOscServer(executor, player);
+        oscServer = new LegacyOscServer(executor, player, this::stageCoreOwnsPlayback);
         oscServer.start(9000);
         refreshSettingsFields();
         showActionResult("Startup", "جاهز للعرض.", "READY ✅", false);
