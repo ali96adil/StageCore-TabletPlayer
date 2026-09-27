@@ -14,9 +14,11 @@ import org.json.JSONObject;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -172,12 +174,29 @@ public final class StageCoreDeviceConnection {
                 while (!stopped && socket != null) sleep(500);
             } catch (javax.net.ssl.SSLException tlsError) {
                 pendingPairingCode = "";
+                if (refreshTrustedHubEndpoint()) {
+                    backoffMs = 1000;
+                    continue;
+                }
                 lastStatus = "TLS_IDENTITY_MISMATCH";
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);
             } catch (StageCoreHubIdentityVerifier.HubIdentityException identityError) {
                 pendingPairingCode = "";
+                if (refreshTrustedHubEndpoint()) {
+                    backoffMs = 1000;
+                    continue;
+                }
                 lastStatus = "HUB_IDENTITY_MISMATCH";
+                sleep(backoffMs);
+                backoffMs = Math.min(15000, backoffMs * 2);
+            } catch (java.io.IOException networkError) {
+                pendingPairingCode = "";
+                if (refreshTrustedHubEndpoint()) {
+                    backoffMs = 1000;
+                    continue;
+                }
+                lastStatus = "HUB_ENDPOINT_UNREACHABLE";
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);
             } catch (Throwable error) {
@@ -187,6 +206,72 @@ public final class StageCoreDeviceConnection {
                 backoffMs = Math.min(15000, backoffMs * 2);
             }
         }
+    }
+
+    private boolean refreshTrustedHubEndpoint() {
+        AppSettings before = AppSettings.load(context);
+        if (!before.autoDiscover || !before.hasTrustedHub()) return false;
+
+        final String rememberedHubId = before.trustedHubId;
+        final String rememberedFingerprint = before.trustedHubFingerprint;
+        final String rememberedPin = before.trustedHubTlsSha256;
+        final String previousHost = before.serverHost;
+        final int previousPort = before.serverPort;
+
+        CountDownLatch found = new CountDownLatch(1);
+        AtomicReference<StageCoreHubCandidate> matched = new AtomicReference<>();
+        StageCoreDiscovery discovery = new StageCoreDiscovery(context);
+        lastStatus = "REDISCOVERING_TRUSTED_HUB";
+        discovery.start(new StageCoreDiscovery.Callback() {
+            @Override public void onFound(StageCoreHubCandidate candidate) {
+                if (candidate == null) return;
+                if (!candidate.matchesBinding(
+                        rememberedHubId, rememberedFingerprint, rememberedPin)) {
+                    return;
+                }
+                if (matched.compareAndSet(null, candidate)) found.countDown();
+            }
+
+            @Override public void onStatus(String message) {
+                // Discovery status is intentionally not copied into runtime status:
+                // this worker only needs a matching trusted endpoint or timeout.
+            }
+        });
+
+        try {
+            found.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            discovery.stop();
+        }
+
+        StageCoreHubCandidate candidate = matched.get();
+        if (candidate == null) return false;
+
+        AppSettings current = AppSettings.load(context);
+        if (!current.hasTrustedHub()
+                || !current.trustedHubId.equals(rememberedHubId)
+                || !current.trustedHubFingerprint.equals(rememberedFingerprint)
+                || !current.trustedHubTlsSha256.equals(rememberedPin)) {
+            return false;
+        }
+        // Never overwrite a concurrent operator edit while discovery was running.
+        if (!current.serverHost.equals(previousHost) || current.serverPort != previousPort) {
+            return false;
+        }
+        if (current.serverHost.equals(candidate.resolvedHost)
+                && current.serverPort == candidate.port) {
+            return false;
+        }
+
+        current.serverHost = candidate.resolvedHost;
+        current.serverPort = candidate.port;
+        current.save(context);
+        reconnectGeneration++;
+        lastStatus = "TRUSTED_HUB_ENDPOINT_REFRESHED";
+        return true;
     }
 
     private void connectWebSocket(

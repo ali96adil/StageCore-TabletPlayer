@@ -124,6 +124,7 @@ Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and d
 
 - Pairing identity is preserved across Projects.
 - Authentication is reacquired before a replacement runtime channel opens.
+- If a remembered Hub endpoint becomes unreachable or now presents the wrong TLS identity, automatic Bonjour recovery may refresh **only the IP/port** from a newly discovered candidate whose Hub ID, Hub fingerprint and exact TLS leaf pin all match the remembered trust binding. A changed identity/pin is never auto-trusted.
 - Hub assignment is re-read after every reconnect.
 - The tablet never self-asserts a previous Project.
 - The app does not replay previously received PREPARE/PLAY/overlay/live commands.
