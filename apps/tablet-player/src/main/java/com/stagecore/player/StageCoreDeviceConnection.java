@@ -86,8 +86,7 @@ public final class StageCoreDeviceConnection {
     }
 
     public void reconnectNow(String reason) {
-        runtimeAuthorityReady = false;
-        lastStatus = "RECONNECTING";
+        clearRuntimeScope("RECONNECTING");
         WebSocket current = socket;
         if (current != null) {
             current.close(1012, reason == null || reason.trim().isEmpty()
@@ -210,17 +209,13 @@ public final class StageCoreDeviceConnection {
             @Override public void onClosed(WebSocket webSocket, int code, String reason) {
                 if (socket == webSocket) socket = null;
                 invalidatePendingLiveCommand(webSocket);
-                runtimeAuthorityReady = false;
-                connectionGeneration = 0;
-                lastStatus = "DISCONNECTED";
+                clearRuntimeScope("DISCONNECTED");
             }
 
             @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
                 if (socket == webSocket) socket = null;
                 invalidatePendingLiveCommand(webSocket);
-                runtimeAuthorityReady = false;
-                connectionGeneration = 0;
-                lastStatus = "DISCONNECTED:" + t.getClass().getSimpleName();
+                clearRuntimeScope("DISCONNECTED:" + t.getClass().getSimpleName());
                 synchronized (openedLock) { openedLock.notifyAll(); }
             }
         });
@@ -231,6 +226,16 @@ public final class StageCoreDeviceConnection {
             ws.cancel();
             throw new IllegalStateException("StageCore WebSocket did not open");
         }
+    }
+
+    private void clearRuntimeScope(String status) {
+        runtimeAuthorityReady = false;
+        assignmentState = "UNKNOWN";
+        assignmentEpoch = 0;
+        connectionGeneration = 0;
+        assignedProjectId = "";
+        assignedRuntimeSnapshotId = "";
+        lastStatus = status;
     }
 
     private JSONObject hello(AppSettings settings, StageCoreClient descriptor) {
