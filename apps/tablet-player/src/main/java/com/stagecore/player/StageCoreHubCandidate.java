@@ -38,7 +38,7 @@ public final class StageCoreHubCandidate {
             String resolvedHost,
             int resolvedPort,
             String serviceType) {
-        if (!SERVICE_TYPE.equals(serviceType)) {
+        if (!isSupportedServiceType(serviceType)) {
             throw new IllegalArgumentException("unsupported StageCore discovery service");
         }
         if (txt == null || !"1".equals(trim(txt.get("v")))) {
@@ -149,6 +149,14 @@ public final class StageCoreHubCandidate {
         return hubId.equals(trim(rememberedHubId).toLowerCase(Locale.US))
                 && fingerprint.equals(trim(rememberedFingerprint))
                 && tlsCertificateSha256.equals(trim(rememberedPin).toLowerCase(Locale.US));
+    }
+
+    static boolean isSupportedServiceType(String value) {
+        String normalized = trim(value).toLowerCase(Locale.US);
+        return SERVICE_TYPE.equals(normalized)
+                || "_stagecore-hub._tcp".equals(normalized)
+                || "_stagecore-hub._tcp.local".equals(normalized)
+                || "_stagecore-hub._tcp.local.".equals(normalized);
     }
 
     static boolean isValidCertificateSha256(String value) {

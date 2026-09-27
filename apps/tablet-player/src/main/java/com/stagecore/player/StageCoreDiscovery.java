@@ -71,7 +71,7 @@ public final class StageCoreDiscovery {
             @Override public void onServiceFound(NsdServiceInfo serviceInfo) {
                 if (!running) return;
                 String type = serviceInfo.getServiceType();
-                if (type == null || !type.equals(serviceType)) return;
+                if (!StageCoreHubCandidate.isSupportedServiceType(type)) return;
                 resolve(serviceInfo, callback);
             }
 

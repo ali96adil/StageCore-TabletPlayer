@@ -26,6 +26,25 @@ public final class StageCoreHubCandidateTest {
     }
 
     @Test
+    public void acceptsAndroidNsdServiceTypeVariants() {
+        String[] serviceTypes = new String[] {
+                "_stagecore-hub._tcp",
+                "_stagecore-hub._tcp.",
+                "_stagecore-hub._tcp.local",
+                "_stagecore-hub._tcp.local."
+        };
+        for (String serviceType : serviceTypes) {
+            StageCoreHubCandidate hub = StageCoreHubCandidate.fromTxt(
+                    validTxt(), "192.168.3.130", 7841, serviceType);
+            assertEquals("01234567-89ab-cdef-8123-456789abcdef", hub.hubId);
+        }
+
+        assertThrows(IllegalArgumentException.class, () ->
+                StageCoreHubCandidate.fromTxt(
+                        validTxt(), "192.168.3.130", 7841, "_stagecore-hub._tcp.evil."));
+    }
+
+    @Test
     public void rememberedBindingReconstructsPinnedEndpoint() {
         StageCoreHubCandidate hub = StageCoreHubCandidate.remembered(
                 "01234567-89ab-cdef-8123-456789abcdef",
