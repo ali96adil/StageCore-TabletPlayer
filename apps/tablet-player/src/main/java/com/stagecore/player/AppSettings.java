@@ -41,11 +41,7 @@ public final class AppSettings {
     public static AppSettings load(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         AppSettings settings = new AppSettings();
-        String storedDeviceId = prefs.getString("device_id", null);
-        boolean generatedDeviceId = storedDeviceId == null || storedDeviceId.trim().isEmpty();
-        settings.deviceId = generatedDeviceId
-                ? "tablet-" + UUID.randomUUID()
-                : storedDeviceId.trim();
+        settings.deviceId = loadStableDeviceId(prefs);
         settings.deviceName = nonBlank(
                 prefs.getString("device_name", null),
                 "Tablet " + suffix(settings.deviceId));
@@ -65,13 +61,22 @@ public final class AppSettings {
         settings.heartbeatEnabled = prefs.getBoolean("heartbeat_enabled", true);
         settings.heartbeatPort = clamp(prefs.getInt("heartbeat_port", 9100), 1, 65535);
         settings.heartbeatIntervalSeconds = clamp(prefs.getInt("heartbeat_interval_seconds", 10), 3, 60);
-        if (generatedDeviceId) {
-            // Persist only the one identity value that must be stable across
-            // independent background/UI loads. Ordinary reads stay read-only
-            // so they cannot race with an explicit operator/settings write.
-            prefs.edit().putString("device_id", settings.deviceId).apply();
-        }
         return settings;
+    }
+
+    private static String loadStableDeviceId(SharedPreferences prefs) {
+        synchronized (AppSettings.class) {
+            String stored = prefs.getString("device_id", null);
+            if (stored != null && !stored.trim().isEmpty()) {
+                return stored.trim();
+            }
+            String generated = "tablet-" + UUID.randomUUID();
+            // SharedPreferences.apply() updates the in-memory map synchronously.
+            // The lock ensures another process-local loader cannot generate a
+            // different identity before that update becomes visible.
+            prefs.edit().putString("device_id", generated).apply();
+            return generated;
+        }
     }
 
     public void save(Context context) {
