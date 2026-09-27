@@ -154,7 +154,7 @@ public final class MainActivity extends Activity {
         oscServer = new LegacyOscServer(executor, player);
         oscServer.start(9000);
         refreshSettingsFields();
-        showActionResult("Startup", "جاهز للعرض. OSC debug يعمل على UDP 9000.", "READY ✅", false);
+        showActionResult("Startup", "جاهز للعرض.", "READY ✅", false);
         setControlsVisible(!appSettings.showModeOnLaunch);
         if (appSettings.autoDiscover) startDiscovery(false);
         heartbeatReporter.start();
@@ -384,7 +384,7 @@ public final class MainActivity extends Activity {
         advancedDebugPanel.setOrientation(LinearLayout.VERTICAL);
         advancedDebugPanel.setVisibility(View.GONE);
         advancedDebugCheck.setOnCheckedChangeListener((buttonView, isChecked) -> advancedDebugPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE));
-        advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore."));
+        advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore. Legacy OSC debug listener: UDP 9000."));
         advancedDebugPanel.addView(rowButtons(
                 button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
                 button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
