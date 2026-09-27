@@ -81,6 +81,21 @@ public final class StageCoreDeviceConnection {
     public String assignedProjectId() { return assignedProjectId; }
     public String assignedRuntimeSnapshotId() { return assignedRuntimeSnapshotId; }
 
+    public boolean runtimeReady() {
+        return runtimeAuthorityReady && "ACTIVE".equals(assignmentState);
+    }
+
+    public void reconnectNow(String reason) {
+        runtimeAuthorityReady = false;
+        lastStatus = "RECONNECTING";
+        WebSocket current = socket;
+        if (current != null) {
+            current.close(1012, reason == null || reason.trim().isEmpty()
+                    ? "tablet settings changed"
+                    : reason.trim());
+        }
+    }
+
     private void connectionLoop() {
         long backoffMs = 1000;
         while (!stopped) {

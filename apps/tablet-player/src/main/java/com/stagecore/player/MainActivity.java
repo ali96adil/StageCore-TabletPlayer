@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Environment;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -56,6 +58,7 @@ public final class MainActivity extends Activity {
     private TextView brightnessLabel;
     private TextView liveRotationLabel;
     private TextView readinessBadge;
+    private TextView stageCoreRuntimeBadge;
     private View controlsPanel;
     private LinearLayout advancedDebugPanel;
     private CheckBox advancedDebugCheck;
@@ -76,6 +79,13 @@ public final class MainActivity extends Activity {
     private String lastError = "";
     private String lastAction = "جاهز";
     private String lastActionState = "READY ✅";
+    private final Handler stageCoreStatusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable stageCoreStatusRefresh = new Runnable() {
+        @Override public void run() {
+            refreshStageCoreConnectionStatus();
+            stageCoreStatusHandler.postDelayed(this, 1000L);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,6 +153,14 @@ public final class MainActivity extends Activity {
         applyAwakeFlag();
         applyShowLockSurface();
         if (heartbeatReporter != null) heartbeatReporter.pokeSoon();
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
+        stageCoreStatusHandler.post(stageCoreStatusRefresh);
+    }
+
+    @Override
+    protected void onPause() {
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
+        super.onPause();
     }
 
     @Override
@@ -175,6 +193,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
         if (heartbeatReporter != null) heartbeatReporter.stop();
         if (player != null) player.release();
         if (oscServer != null) oscServer.stop();
@@ -195,6 +214,8 @@ public final class MainActivity extends Activity {
         panel.addView(help("تابلت عرض احترافي: التشغيل والكيوات من StageCore، وهذا المكان فقط للإعداد والفحص السريع."));
         readinessBadge = badge("جاهزية العرض: جاري الفحص...");
         panel.addView(readinessBadge);
+        stageCoreRuntimeBadge = badge("StageCore runtime: جاري الاتصال...");
+        panel.addView(stageCoreRuntimeBadge);
 
         statusHeader = badge("جاهز");
         statusHeader.setBackgroundColor(0x55222222);
@@ -493,18 +514,26 @@ public final class MainActivity extends Activity {
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
         if (liveRotationLabel != null) liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        refreshStageCoreConnectionStatus();
         updateReadinessBadge();
         updateStatusHeader();
     }
 
     private void saveSettingsFromFields() {
+        String previousDeviceId = appSettings.deviceId;
+        String previousDeviceName = appSettings.deviceName;
         String previousServerHost = appSettings.serverHost;
         int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, "");
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
-        if (!sameEndpoint(previousServerHost, previousServerPort, appSettings.serverHost, appSettings.serverPort)) {
+        boolean endpointChanged = !sameEndpoint(
+                previousServerHost, previousServerPort,
+                appSettings.serverHost, appSettings.serverPort);
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
+                || !previousDeviceName.equals(appSettings.deviceName);
+        if (endpointChanged) {
             appSettings.clearTrustedHub();
             pendingHubCandidate = null;
         }
@@ -515,6 +544,11 @@ public final class MainActivity extends Activity {
         appSettings.heartbeatEnabled = heartbeatCheck != null && heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        if (endpointChanged || identityChanged) {
+            requestDeviceReconnect(endpointChanged
+                    ? "StageCore endpoint/trust changed"
+                    : "Tablet identity changed");
+        }
         applyAwakeFlag();
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
@@ -530,6 +564,7 @@ public final class MainActivity extends Activity {
         appSettings.deviceId = "tablet-" + java.util.UUID.randomUUID();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        requestDeviceReconnect("Tablet identity regenerated");
         refreshSettingsFields();
         showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
         pokeHeartbeat();
@@ -770,9 +805,12 @@ public final class MainActivity extends Activity {
 
     private void updateStatusHeader() {
         if (statusHeader == null || appSettings == null || stageCoreClient == null) return;
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        String runtime = connection == null ? "UNAVAILABLE" : connection.status();
         statusHeader.setText("الجهاز: " + stageCoreClient.deviceName()
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + " | Hub: " + appSettings.hubTrustLabel()
+                + " | StageCore: " + runtime
                 + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
@@ -859,12 +897,17 @@ public final class MainActivity extends Activity {
         String scan = compactMediaScanSummary();
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
         boolean missing = !scan.contains("النواقص: 0");
-        String status = hasPermission && !missing && appSettings.hasTrustedHub()
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        boolean runtimeReady = connection != null && connection.runtimeReady();
+        String runtimeStatus = connection == null ? "UNAVAILABLE" : connection.status();
+        String status = hasPermission && !missing && appSettings.hasTrustedHub() && runtimeReady
                 ? "READY ✅" : "CHECK NEEDED ⚠️";
         return "فحص قبل العرض: " + status
                 + "\nالصلاحيات: " + storagePermissionState()
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + "\nHub trust: " + appSettings.hubTrustLabel()
+                + "\nStageCore runtime: " + runtimeStatus
+                + "\nAssignment: " + assignmentSummary(connection)
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
                 + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
                 + "\n\n" + scan
@@ -941,9 +984,60 @@ public final class MainActivity extends Activity {
         if (readinessBadge == null || mediaResolver == null || manifestStore == null || appSettings == null) return;
         String scan = mediaResolver.scanSummary(manifestStore.activeManifest());
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
-        boolean ready = hasPermission && scan.contains("النواقص: 0") && appSettings.hasTrustedHub();
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        boolean ready = hasPermission
+                && scan.contains("النواقص: 0")
+                && appSettings.hasTrustedHub()
+                && connection != null
+                && connection.runtimeReady();
         readinessBadge.setText(ready ? "جاهزية العرض: READY ✅" : "جاهزية العرض: تحتاج فحص ⚠️");
         readinessBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
+    }
+
+    private void refreshStageCoreConnectionStatus() {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        if (stageCoreRuntimeBadge != null) {
+            if (connection == null) {
+                stageCoreRuntimeBadge.setText("StageCore runtime: UNAVAILABLE");
+                stageCoreRuntimeBadge.setBackgroundColor(0x55AA8833);
+            } else {
+                boolean ready = connection.runtimeReady();
+                stageCoreRuntimeBadge.setText("StageCore runtime: " + connection.status()
+                        + "\n" + assignmentSummary(connection));
+                stageCoreRuntimeBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
+            }
+        }
+        updateReadinessBadge();
+        updateStatusHeader();
+    }
+
+    private StageCoreDeviceConnection officialDeviceConnection() {
+        android.app.Application application = getApplication();
+        if (!(application instanceof StageCoreApplication)) return null;
+        return ((StageCoreApplication) application).deviceConnection();
+    }
+
+    private void requestDeviceReconnect(String reason) {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        if (connection != null) connection.reconnectNow(reason);
+    }
+
+    private static String assignmentSummary(StageCoreDeviceConnection connection) {
+        if (connection == null) return "Assignment: unavailable";
+        String state = connection.assignmentState();
+        if (!"ACTIVE".equals(state)) {
+            return "Assignment: " + state + " | epoch=" + connection.assignmentEpoch();
+        }
+        return "Assignment: ACTIVE"
+                + " | epoch=" + connection.assignmentEpoch()
+                + " | project=" + compactId(connection.assignedProjectId())
+                + " | snapshot=" + compactId(connection.assignedRuntimeSnapshotId());
+    }
+
+    private static String compactId(String value) {
+        if (value == null || value.trim().isEmpty()) return "-";
+        String trimmed = value.trim();
+        return trimmed.length() <= 12 ? trimmed : trimmed.substring(0, 12) + "…";
     }
 
     private void applyScreenBrightness(int percent) {
@@ -997,13 +1091,20 @@ public final class MainActivity extends Activity {
     }
 
     private void saveSettingsFromFieldsWithoutRender() {
+        String previousDeviceId = appSettings.deviceId;
+        String previousDeviceName = appSettings.deviceName;
         String previousServerHost = appSettings.serverHost;
         int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, appSettings.serverHost);
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
-        if (!sameEndpoint(previousServerHost, previousServerPort, appSettings.serverHost, appSettings.serverPort)) {
+        boolean endpointChanged = !sameEndpoint(
+                previousServerHost, previousServerPort,
+                appSettings.serverHost, appSettings.serverPort);
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
+                || !previousDeviceName.equals(appSettings.deviceName);
+        if (endpointChanged) {
             appSettings.clearTrustedHub();
             pendingHubCandidate = null;
         }
@@ -1014,6 +1115,11 @@ public final class MainActivity extends Activity {
         appSettings.heartbeatEnabled = heartbeatCheck == null || heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        if (endpointChanged || identityChanged) {
+            requestDeviceReconnect(endpointChanged
+                    ? "StageCore endpoint/trust changed"
+                    : "Tablet identity changed");
+        }
         applyAwakeFlag();
     }
 
