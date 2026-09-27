@@ -900,6 +900,10 @@ public final class MainActivity extends Activity {
         StageCoreDeviceConnection connection = officialDeviceConnection();
         boolean runtimeReady = connection != null && connection.runtimeReady();
         String runtimeStatus = connection == null ? "UNAVAILABLE" : connection.status();
+        String pairingCode = connection == null ? "" : connection.pendingPairingCode();
+        String pairingLine = pairingCode == null || pairingCode.trim().isEmpty()
+                ? ""
+                : "\nPairing code: " + pairingCode.trim();
         String status = hasPermission && !missing && appSettings.hasTrustedHub() && runtimeReady
                 ? "READY ✅" : "CHECK NEEDED ⚠️";
         return "فحص قبل العرض: " + status
@@ -907,6 +911,7 @@ public final class MainActivity extends Activity {
                 + "\nالسيرفر: " + appSettings.serverLabel()
                 + "\nHub trust: " + appSettings.hubTrustLabel()
                 + "\nStageCore runtime: " + runtimeStatus
+                + pairingLine
                 + "\n" + assignmentSummary(connection)
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
                 + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
@@ -1002,7 +1007,12 @@ public final class MainActivity extends Activity {
                 stageCoreRuntimeBadge.setBackgroundColor(0x55AA8833);
             } else {
                 boolean ready = connection.runtimeReady();
+                String pairingCode = connection.pendingPairingCode();
+                String pairing = pairingCode == null || pairingCode.trim().isEmpty()
+                        ? ""
+                        : "\nPairing code: " + pairingCode.trim();
                 stageCoreRuntimeBadge.setText("StageCore runtime: " + connection.status()
+                        + pairing
                         + "\n" + assignmentSummary(connection));
                 stageCoreRuntimeBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
             }

@@ -51,6 +51,7 @@ public final class StageCoreDeviceConnection {
     private volatile String assignedProjectId = "";
     private volatile String assignedRuntimeSnapshotId = "";
     private volatile boolean runtimeAuthorityReady;
+    private volatile long reconnectGeneration;
 
     private final Object pendingLiveLock = new Object();
     private String pendingLiveCommandId = "";
@@ -86,6 +87,8 @@ public final class StageCoreDeviceConnection {
     }
 
     public void reconnectNow(String reason) {
+        reconnectGeneration++;
+        pendingPairingCode = "";
         clearRuntimeScope("RECONNECTING");
         WebSocket current = socket;
         if (current != null) {
@@ -98,6 +101,7 @@ public final class StageCoreDeviceConnection {
     private void connectionLoop() {
         long backoffMs = 1000;
         while (!stopped) {
+            final long attemptGeneration = reconnectGeneration;
             try {
                 AppSettings settings = AppSettings.load(context);
                 if (settings.serverHost == null || settings.serverHost.trim().isEmpty()) {
@@ -135,32 +139,48 @@ public final class StageCoreDeviceConnection {
                             descriptor.baselineCapabilities());
                     pendingPairingCode = receipt.pairingCode;
                     showPairingCode(receipt.pairingCode);
-                    while (!stopped) {
+                    while (!stopped && attemptGeneration == reconnectGeneration) {
                         String state = pairing.pairingStatus(baseUrl, receipt);
                         lastStatus = "PAIRING_" + state;
                         if ("APPROVED".equals(state)) break;
                         if ("REJECTED".equals(state) || "EXPIRED".equals(state)) {
+                            pendingPairingCode = "";
                             throw new IllegalStateException("pairing " + state.toLowerCase());
                         }
                         sleep(1500);
                     }
                     if (stopped) return;
+                    if (attemptGeneration != reconnectGeneration) {
+                        pendingPairingCode = "";
+                        lastStatus = "RECONNECTING";
+                        backoffMs = 1000;
+                        continue;
+                    }
                     pendingPairingCode = "";
                     session = pairing.authenticate(baseUrl);
+                }
+                if (attemptGeneration != reconnectGeneration) {
+                    pendingPairingCode = "";
+                    lastStatus = "RECONNECTING";
+                    backoffMs = 1000;
+                    continue;
                 }
                 lastStatus = "AUTHENTICATED";
                 connectWebSocket(baseUrl, settings, descriptor, session, trustedTransport);
                 backoffMs = 1000;
                 while (!stopped && socket != null) sleep(500);
             } catch (javax.net.ssl.SSLException tlsError) {
+                pendingPairingCode = "";
                 lastStatus = "TLS_IDENTITY_MISMATCH";
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);
             } catch (StageCoreHubIdentityVerifier.HubIdentityException identityError) {
+                pendingPairingCode = "";
                 lastStatus = "HUB_IDENTITY_MISMATCH";
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);
             } catch (Throwable error) {
+                pendingPairingCode = "";
                 lastStatus = "ERROR:" + error.getClass().getSimpleName();
                 sleep(backoffMs);
                 backoffMs = Math.min(15000, backoffMs * 2);
