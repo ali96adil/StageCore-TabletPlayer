@@ -270,7 +270,7 @@ public final class StageCoreDeviceConnection {
         current.serverHost = candidate.resolvedHost;
         current.serverPort = candidate.port;
         current.save(context);
-        reconnectGeneration++;
+        reconnectGeneration.incrementAndGet();
         lastStatus = "TRUSTED_HUB_ENDPOINT_REFRESHED";
         return true;
     }
