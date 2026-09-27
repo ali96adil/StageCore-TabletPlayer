@@ -41,8 +41,14 @@ public final class AppSettings {
     public static AppSettings load(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         AppSettings settings = new AppSettings();
-        settings.deviceId = nonBlank(prefs.getString("device_id", null), "tablet-" + UUID.randomUUID());
-        settings.deviceName = nonBlank(prefs.getString("device_name", null), "Tablet " + suffix(settings.deviceId));
+        String storedDeviceId = prefs.getString("device_id", null);
+        boolean generatedDeviceId = storedDeviceId == null || storedDeviceId.trim().isEmpty();
+        settings.deviceId = generatedDeviceId
+                ? "tablet-" + UUID.randomUUID()
+                : storedDeviceId.trim();
+        settings.deviceName = nonBlank(
+                prefs.getString("device_name", null),
+                "Tablet " + suffix(settings.deviceId));
         settings.serverHost = prefs.getString("server_host", "");
         settings.serverPort = clamp(prefs.getInt("server_port", 8080), 1, 65535);
         settings.trustedHubId = prefs.getString("trusted_hub_id", "");
@@ -59,7 +65,12 @@ public final class AppSettings {
         settings.heartbeatEnabled = prefs.getBoolean("heartbeat_enabled", true);
         settings.heartbeatPort = clamp(prefs.getInt("heartbeat_port", 9100), 1, 65535);
         settings.heartbeatIntervalSeconds = clamp(prefs.getInt("heartbeat_interval_seconds", 10), 3, 60);
-        settings.save(context);
+        if (generatedDeviceId) {
+            // Persist only the one identity value that must be stable across
+            // independent background/UI loads. Ordinary reads stay read-only
+            // so they cannot race with an explicit operator/settings write.
+            prefs.edit().putString("device_id", settings.deviceId).apply();
+        }
         return settings;
     }
 
