@@ -2,6 +2,11 @@ plugins {
     id("com.android.application")
 }
 
+val stageCoreBuildRevision =
+    System.getenv("STAGECORE_BUILD_SHA")?.trim()?.takeIf { it.isNotEmpty() } ?: "local"
+val stageCoreBuildRevisionShort =
+    if (stageCoreBuildRevision.length > 12) stageCoreBuildRevision.take(12) else stageCoreBuildRevision
+
 android {
     namespace = "com.stagecore.player"
     compileSdk = 35
@@ -13,13 +18,14 @@ android {
         versionCode = 102
         versionName = "1.0.0-rc3"
         buildConfigField("String", "BUILD_LABEL", "\"© 2026 Ali Adil — ali96adil@gmail.com — All rights reserved\"")
+        buildConfigField("String", "BUILD_REVISION", "\"$stageCoreBuildRevision\"")
     }
 
     // Isolate the experimental MJPEG APK from the installed RC3 release.
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".mjpegtrial"
-            versionNameSuffix = "-mjpegtrial"
+            versionNameSuffix = "-mjpegtrial-$stageCoreBuildRevisionShort"
         }
     }
 

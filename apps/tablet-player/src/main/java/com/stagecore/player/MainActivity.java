@@ -1136,6 +1136,7 @@ public final class MainActivity extends Activity {
     private String buildInfoSummary() {
         return "Version: " + BuildConfig.VERSION_NAME
                 + " (" + BuildConfig.VERSION_CODE + ")"
+                + "\nRevision: " + BuildConfig.BUILD_REVISION
                 + "\nBuild: " + BuildConfig.BUILD_LABEL
                 + "\nPackage: " + getPackageName();
     }

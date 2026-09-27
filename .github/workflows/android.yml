@@ -8,8 +8,18 @@ on:
 jobs:
   tablet-player:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      STAGECORE_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+      - name: Verify exact source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -24,9 +34,29 @@ jobs:
           gradle-version: 8.10.2
       - name: Test and build tablet player debug APK
         run: gradle :apps:tablet-player:testDebugUnitTest :apps:tablet-player:assembleDebug --no-daemon
+      - name: Verify and stage exact APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find apps/tablet-player/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          OUT="$RUNNER_TEMP/tablet-player-artifact"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$APK" "$OUT/tablet-player-debug.apk"
+          sha256sum "$OUT/tablet-player-debug.apk" > "$OUT/SHA256SUMS"
+          {
+            echo "source_revision=$EXPECTED_SHA"
+            echo "version_name=1.0.0-rc3-mjpegtrial-${EXPECTED_SHA:0:12}"
+            echo "application_id=com.stagecore.player.mjpegtrial"
+          } > "$OUT/BUILDINFO"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT/tablet-player-debug.apk" \
+            | tee "$OUT/AAPT_BADGING.txt"
+          grep -F "versionName='1.0.0-rc3-mjpegtrial-${EXPECTED_SHA:0:12}'" "$OUT/AAPT_BADGING.txt"
+          grep -F "package: name='com.stagecore.player.mjpegtrial'" "$OUT/AAPT_BADGING.txt"
       - name: Upload tablet player debug APK
         uses: actions/upload-artifact@v4
         with:
           name: stagecore-player-debug-apk
-          path: apps/tablet-player/build/outputs/apk/debug/*.apk
+          path: ${{ runner.temp }}/tablet-player-artifact/
           if-no-files-found: error
