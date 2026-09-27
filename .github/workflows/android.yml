@@ -44,7 +44,10 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$OUT"
           cp "$APK" "$OUT/tablet-player-debug.apk"
-          sha256sum "$OUT/tablet-player-debug.apk" > "$OUT/SHA256SUMS"
+          (
+            cd "$OUT"
+            sha256sum tablet-player-debug.apk > SHA256SUMS
+          )
           {
             echo "source_revision=$EXPECTED_SHA"
             echo "version_name=1.0.0-rc3-mjpegtrial-${EXPECTED_SHA:0:12}"

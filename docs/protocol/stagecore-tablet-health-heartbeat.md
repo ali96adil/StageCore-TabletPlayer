@@ -41,9 +41,12 @@ Each heartbeat should include:
   "brightness_percent": 85,
   "orientation_mode": "PORTRAIT",
   "video_scale_mode": "CROP",
+  "assignment_state": "ACTIVE",
   "project_id": "...",
   "runtime_snapshot_id": "...",
   "tablet_manifest_id": "...",
+  "local_manifest_project_id": "...",
+  "local_manifest_runtime_snapshot_id": "...",
   "media_readiness": "READY",
   "missing_media": [],
   "permission_state": "OK",
@@ -103,3 +106,12 @@ tablet.settings.apply
 ```
 
 StageCore can use heartbeat data for a dashboard, but final readiness should still be confirmed by explicit `tablet.media.scan` before the show starts.
+
+
+### v2 authority note
+
+For `stagecore.device/2`, the heartbeat's `project_id` and `runtime_snapshot_id` are observational mirrors of the **current authenticated Hub-owned ACTIVE assignment**. They are `unknown` when that authority is not READY/ACTIVE. They must never be populated from legacy Project/Snapshot fields inside `tablet_manifest.json`.
+
+The local manifest values remain available only under the explicitly non-authoritative `local_manifest_project_id` and `local_manifest_runtime_snapshot_id` diagnostic fields. This prevents a reused tablet from advertising Project A as current after the Hub has assigned it to Project B.
+
+The UDP heartbeat remains best-effort rehearsal/status telemetry and never grants command authority.

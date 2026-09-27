@@ -117,9 +117,23 @@ public final class MainActivity extends Activity {
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         discovery = new StageCoreDiscovery(this);
         heartbeatReporter = new TabletHeartbeatReporter(this, new TabletHeartbeatReporter.SnapshotProvider() {
-            @Override public AppSettings settings() { return appSettings; }
+            @Override public AppSettings settings() { return AppSettings.load(MainActivity.this); }
             @Override public TabletManifest manifest() { return manifestStore.activeManifest(); }
             @Override public String manifestSource() { return manifestStore.activeSource(); }
+            @Override public String stageCoreProjectId() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection != null && connection.runtimeReady()
+                        ? connection.assignedProjectId() : "";
+            }
+            @Override public String stageCoreRuntimeSnapshotId() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection != null && connection.runtimeReady()
+                        ? connection.assignedRuntimeSnapshotId() : "";
+            }
+            @Override public String stageCoreAssignmentState() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection == null ? "UNAVAILABLE" : connection.assignmentState();
+            }
             @Override public String mediaScanSummary() { return mediaResolver.scanSummary(manifestStore.activeManifest()).replace('\n', ';'); }
             @Override public String storagePermissionState() { return MainActivity.this.storagePermissionState(); }
             @Override public String playerState() { return player.observationSummary(); }
@@ -210,7 +224,7 @@ public final class MainActivity extends Activity {
         panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         panel.setTextDirection(View.TEXT_DIRECTION_RTL);
 
-        panel.addView(title("StageCore Player V1"));
+        panel.addView(title("StageCore Player"));
         panel.addView(help("تابلت عرض احترافي: التشغيل والكيوات من StageCore، وهذا المكان فقط للإعداد والفحص السريع."));
         readinessBadge = badge("جاهزية العرض: جاري الفحص...");
         panel.addView(readinessBadge);
@@ -256,7 +270,8 @@ public final class MainActivity extends Activity {
         ));
         panel.addView(help("لف الكاميرا عمودياً ثم اختر 90° أو 270° حسب اتجاهها. Fit يعرض الصورة كاملة؛ Crop يقص الحواف."));
         liveUrlInput = editText();
-        liveUrlInput.setText("http://192.168.3.80:81/stream");
+        liveUrlInput.setHint("http://<relay-ip>:9081/api/v0/stream");
+        liveUrlInput.setText("");
         panel.addView(field("Live URL", liveUrlInput));
         panel.addView(rowButtons(
                 button("Test Live URL", v -> testLiveUrl()),
