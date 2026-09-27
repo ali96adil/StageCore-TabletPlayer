@@ -606,7 +606,7 @@ public final class StageCoreDeviceConnection {
                     snapshotId,
                     acceptedEpoch,
                     acceptedGeneration)) {
-                remember(commandId);
+                commandIds.complete(commandId);
                 if (socket == webSocket) {
                     sendResult(webSocket, commandId,
                             CommandResult.cancelled(
@@ -617,7 +617,7 @@ public final class StageCoreDeviceConnection {
                 return;
             }
             if (commandDeadlineExpired(deadlineAt, System.currentTimeMillis())) {
-                remember(commandId);
+                commandIds.complete(commandId);
                 sendResult(webSocket, commandId,
                         CommandResult.timedOut(
                                 "COMMAND_DEADLINE_EXPIRED",
@@ -628,7 +628,7 @@ public final class StageCoreDeviceConnection {
 
             CommandResult contentScope = StageCoreRuntimeBridge.validateV2ManifestHint(manifestId);
             if (contentScope.status != CommandStatus.COMPLETED) {
-                remember(commandId);
+                commandIds.complete(commandId);
                 sendResult(webSocket, commandId, contentScope);
                 sendObservation(webSocket);
                 return;
@@ -711,7 +711,7 @@ public final class StageCoreDeviceConnection {
         final long token;
         synchronized (pendingLiveLock) {
             if (!pendingLiveCommandId.isEmpty()) {
-                remember(commandId);
+                commandIds.complete(commandId);
                 sendResult(webSocket, commandId,
                         CommandResult.rejected(
                                 "LIVE_ALREADY_CONNECTING",
@@ -743,7 +743,7 @@ public final class StageCoreDeviceConnection {
                 });
         if (started.status != CommandStatus.ACCEPTED) {
             clearPendingLiveCommand(webSocket, commandId, token);
-            remember(commandId);
+            commandIds.complete(commandId);
             sendResult(webSocket, commandId, started);
             sendObservation(webSocket);
             return;
@@ -772,7 +772,7 @@ public final class StageCoreDeviceConnection {
         if (hideLive) {
             StageCoreRuntimeBridge.execute("TABLET_LIVE_HIDE", new JSONObject());
         }
-        remember(commandId);
+        commandIds.complete(commandId);
         sendResult(webSocket, commandId, terminal);
         sendObservation(webSocket);
     }
