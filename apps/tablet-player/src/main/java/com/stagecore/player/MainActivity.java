@@ -246,18 +246,18 @@ public final class MainActivity extends Activity {
                 button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true))
         ));
         panel.addView(rowButtons(
-                button("Identify", v -> showResult("Identify", player.identify())),
+                button("Identify", v -> runLocalPlaybackAction("Identify", () -> player.identify())),
                 button("دخول وضع العرض", v -> enterShowModeNow()),
                 button("إغلاق التطبيق", v -> finish())
         ));
 
         panel.addView(section("تحكم سريع آمن"));
         panel.addView(rowButtons(
-                button("Clear Overlay", v -> showResult("Clear Overlay", player.hideOverlay(0))),
-                button("Hide Live", v -> showResult("Hide Live", player.hideLive())),
-                button("Clear Blackout", v -> showResult("Clear Blackout", player.clearBlackout()))
+                button("Clear Overlay", v -> runLocalPlaybackAction("Clear Overlay", () -> player.hideOverlay(0))),
+                button("Hide Live", v -> runLocalPlaybackAction("Hide Live", () -> player.hideLive())),
+                button("Clear Blackout", v -> runLocalPlaybackAction("Clear Blackout", () -> player.clearBlackout()))
         ));
-        panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
+        panel.addView(help("هذه الأزرار للبروفة/الأوفلاين فقط، وتتوقف عن تغيير العرض عندما يكون StageCore runtime بحالة READY. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
         liveRotationLabel = help("Live Rotation: " + appSettings.liveRotationDegrees + "°");
@@ -275,7 +275,7 @@ public final class MainActivity extends Activity {
         panel.addView(field("Live URL", liveUrlInput));
         panel.addView(rowButtons(
                 button("Test Live URL", v -> testLiveUrl()),
-                button("Hide Live", v -> showResult("Hide Live", player.hideLive()))
+                button("Hide Live", v -> runLocalPlaybackAction("Hide Live", () -> player.hideLive()))
         ));
 
         panel.addView(section("الصورة والسطوع"));
@@ -386,21 +386,21 @@ public final class MainActivity extends Activity {
         advancedDebugCheck.setOnCheckedChangeListener((buttonView, isChecked) -> advancedDebugPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE));
         advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore. Legacy OSC debug listener: UDP 9000."));
         advancedDebugPanel.addView(rowButtons(
-                button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
-                button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
-                button("Overlay 2", v -> showResult("Overlay 2", executor.goCue(2)))
+                button("Prepare 1", v -> runLocalPlaybackAction("Prepare 1", () -> executor.prepareCue(1))),
+                button("GO 1", v -> runLocalPlaybackAction("GO 1", () -> executor.goCue(1))),
+                button("Overlay 2", v -> runLocalPlaybackAction("Overlay 2", () -> executor.goCue(2)))
         ));
         advancedDebugPanel.addView(rowButtons(
-                button("Sample Live Cue 3", v -> showResult("Sample Live Cue 3", executor.goCue(3))),
-                button("Blackout 4", v -> showResult("Blackout 4", executor.goCue(4))),
-                button("Clear", v -> showResult("Clear", player.clearBlackout()))
+                button("Sample Live Cue 3", v -> runLocalPlaybackAction("Sample Live Cue 3", () -> executor.goCue(3))),
+                button("Blackout 4", v -> runLocalPlaybackAction("Blackout 4", () -> executor.goCue(4))),
+                button("Clear", v -> runLocalPlaybackAction("Clear", () -> player.clearBlackout()))
         ));
         cueNumberInput = editText();
         cueNumberInput.setText("1");
         advancedDebugPanel.addView(field("رقم Cue للاختبار اليدوي", cueNumberInput));
         advancedDebugPanel.addView(rowButtons(
-                button("Prepare Cue", v -> showResult("Prepare Cue " + selectedCueNumber(), executor.prepareCue(selectedCueNumber()))),
-                button("GO Cue", v -> showResult("GO Cue " + selectedCueNumber(), executor.goCue(selectedCueNumber())))
+                button("Prepare Cue", v -> runLocalPlaybackAction("Prepare Cue " + selectedCueNumber(), () -> executor.prepareCue(selectedCueNumber()))),
+                button("GO Cue", v -> runLocalPlaybackAction("GO Cue " + selectedCueNumber(), () -> executor.goCue(selectedCueNumber())))
         ));
         panel.addView(advancedDebugPanel);
 
@@ -774,6 +774,29 @@ public final class MainActivity extends Activity {
         manifestStore.tryLoadFromDiskOrSample(mediaResolver.manifestFile());
     }
 
+    private interface LocalPlaybackAction {
+        CommandResult run();
+    }
+
+    private boolean stageCoreOwnsPlayback() {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        return connection != null && connection.runtimeReady();
+    }
+
+    private CommandResult localPlaybackAuthorityRejected() {
+        return CommandResult.rejected(
+                "STAGECORE_AUTHORITY_ACTIVE",
+                "Local playback controls are disabled while the authenticated StageCore runtime is READY");
+    }
+
+    private void runLocalPlaybackAction(String actionName, LocalPlaybackAction action) {
+        if (stageCoreOwnsPlayback()) {
+            showResult(actionName, localPlaybackAuthorityRejected());
+            return;
+        }
+        showResult(actionName, action.run());
+    }
+
     private void showResult(String actionName, CommandResult result) {
         String message = result.toString();
         String severity = classifyResult(message);
@@ -979,6 +1002,10 @@ public final class MainActivity extends Activity {
     }
 
     private void testLiveUrl() {
+        if (stageCoreOwnsPlayback()) {
+            showResult("Test Live URL", localPlaybackAuthorityRejected());
+            return;
+        }
         String url = value(liveUrlInput, "");
         if (url.trim().isEmpty()) {
             lastError = "Live URL missing";
