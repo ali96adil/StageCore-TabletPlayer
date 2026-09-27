@@ -320,21 +320,25 @@ public final class StageCoreDeviceConnection {
             }
 
             @Override public void onClosed(WebSocket webSocket, int code, String reason) {
-                if (socket == webSocket) {
+                boolean wasCurrent = sameSocket(socket, webSocket);
+                if (wasCurrent) {
                     socket = null;
                     socketDeviceId = "";
                 }
                 invalidatePendingLiveCommand(webSocket);
-                clearRuntimeScope("DISCONNECTED");
+                if (wasCurrent) clearRuntimeScope("DISCONNECTED");
             }
 
             @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                if (socket == webSocket) {
+                boolean wasCurrent = sameSocket(socket, webSocket);
+                if (wasCurrent) {
                     socket = null;
                     socketDeviceId = "";
                 }
                 invalidatePendingLiveCommand(webSocket);
-                clearRuntimeScope("DISCONNECTED:" + t.getClass().getSimpleName());
+                if (wasCurrent) {
+                    clearRuntimeScope("DISCONNECTED:" + t.getClass().getSimpleName());
+                }
                 synchronized (openedLock) { openedLock.notifyAll(); }
             }
         });
@@ -853,6 +857,10 @@ public final class StageCoreDeviceConnection {
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(json.toString());
         } catch (Exception ignored) {}
+    }
+
+    static boolean sameSocket(Object current, Object candidate) {
+        return current != null && current == candidate;
     }
 
     private String deviceIdForSocket(WebSocket webSocket) {
