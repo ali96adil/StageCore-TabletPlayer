@@ -783,6 +783,14 @@ public final class MainActivity extends Activity {
     }
 
     private void reloadManifestAndScan() {
+        if (stageCoreOwnsPlayback()) {
+            showResult(
+                    "Reload + Scan",
+                    CommandResult.rejected(
+                            "STAGECORE_AUTHORITY_ACTIVE",
+                            "Manifest reload is disabled while the authenticated StageCore runtime channel is connected"));
+            return;
+        }
         loadExternalOrSample();
         String details = "تمت إعادة تحميل المنفست.\n\n" + compactMediaScanSummary() + "\n\n" + cuePreviewSummary();
         showActionResult("Reload + Scan", details, details.contains("النواقص: 0") ? "READY ✅" : "CHECK ⚠️", true);
