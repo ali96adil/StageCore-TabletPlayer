@@ -262,25 +262,21 @@ public final class StageCoreDeviceConnection {
         StageCoreHubCandidate candidate = matched.get();
         if (candidate == null) return false;
 
-        AppSettings current = AppSettings.load(context);
-        if (!current.hasTrustedHub()
-                || !current.trustedHubId.equals(rememberedHubId)
-                || !current.trustedHubFingerprint.equals(rememberedFingerprint)
-                || !current.trustedHubTlsSha256.equals(rememberedPin)) {
+        if (previousHost.equals(candidate.resolvedHost)
+                && previousPort == candidate.port) {
             return false;
         }
-        // Never overwrite a concurrent operator edit while discovery was running.
-        if (!current.serverHost.equals(previousHost) || current.serverPort != previousPort) {
+        if (!AppSettings.updateTrustedHubEndpointIfUnchanged(
+                context,
+                rememberedHubId,
+                rememberedFingerprint,
+                rememberedPin,
+                previousHost,
+                previousPort,
+                candidate.resolvedHost,
+                candidate.port)) {
             return false;
         }
-        if (current.serverHost.equals(candidate.resolvedHost)
-                && current.serverPort == candidate.port) {
-            return false;
-        }
-
-        current.serverHost = candidate.resolvedHost;
-        current.serverPort = candidate.port;
-        current.save(context);
         reconnectGeneration.incrementAndGet();
         lastStatus = "TRUSTED_HUB_ENDPOINT_REFRESHED";
         return true;

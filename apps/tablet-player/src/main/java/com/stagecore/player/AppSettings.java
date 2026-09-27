@@ -151,6 +151,42 @@ public final class AppSettings {
         trustedHubTlsSha256 = candidate.tlsCertificateSha256;
     }
 
+    public static boolean updateTrustedHubEndpointIfUnchanged(
+            Context context,
+            String expectedHubId,
+            String expectedFingerprint,
+            String expectedPin,
+            String expectedHost,
+            int expectedPort,
+            String newHost,
+            int newPort) {
+        if (context == null || newHost == null || newHost.trim().isEmpty()
+                || newPort < 1 || newPort > 65535) {
+            return false;
+        }
+        synchronized (AppSettings.class) {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            String hubId = normalize(prefs.getString("trusted_hub_id", ""));
+            String fingerprint = prefs.getString("trusted_hub_fingerprint", "");
+            String pin = normalize(prefs.getString("trusted_hub_tls_sha256", ""));
+            String host = prefs.getString("server_host", "");
+            int port = clamp(prefs.getInt("server_port", 8080), 1, 65535);
+
+            if (!hubId.equals(normalize(expectedHubId))
+                    || !fingerprint.equals(expectedFingerprint == null ? "" : expectedFingerprint.trim())
+                    || !pin.equals(normalize(expectedPin))
+                    || !host.equals(expectedHost == null ? "" : expectedHost.trim())
+                    || port != expectedPort) {
+                return false;
+            }
+            prefs.edit()
+                    .putString("server_host", newHost.trim())
+                    .putInt("server_port", newPort)
+                    .apply();
+            return true;
+        }
+    }
+
     public void clearTrustedHub() {
         trustedHubId = "";
         trustedHubFingerprint = "";
@@ -170,6 +206,10 @@ public final class AppSettings {
         if (!heartbeatEnabled) return "متوقف";
         if (serverHost == null || serverHost.trim().isEmpty()) return "بانتظار السيرفر";
         return serverHost + ":" + heartbeatPort + " كل " + heartbeatIntervalSeconds + " ثواني";
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.US);
     }
 
     private static String nonBlank(String value, String fallback) {
