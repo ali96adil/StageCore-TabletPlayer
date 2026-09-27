@@ -7,6 +7,8 @@ import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
+import org.json.JSONObject;
+
 import java.io.File;
 
 public final class ManifestExecutor {
@@ -47,6 +49,10 @@ public final class ManifestExecutor {
      * assignment, not to legacy fields embedded in a local media manifest.
      * The local manifest may still be checked as an optional content hint.
      */
+    public JSONObject playerObservedState() {
+        return player == null ? new JSONObject() : player.observedStateJson();
+    }
+
     public CommandResult validateV2ManifestHint(String manifestId) {
         TabletManifest manifest = activeManifest();
         if (manifest == null) {

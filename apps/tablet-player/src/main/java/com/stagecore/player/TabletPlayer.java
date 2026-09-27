@@ -17,6 +17,8 @@ import android.widget.TextView;
 import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.TabletAction;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.Locale;
@@ -354,6 +356,25 @@ public final class TabletPlayer {
                 + " blackout=" + blackoutVisible
                 + " scale=" + videoScaleMode
                 + " live_rotation=" + liveRotationDegrees;
+    }
+
+    /**
+     * Typed, current player state for authenticated StageCore observation.
+     * This is observational only: it does not grant command/replay authority.
+     */
+    public JSONObject observedStateJson() {
+        JSONObject object = new JSONObject();
+        try {
+            object.put("main_media", currentMain);
+            object.put("prepared_main_media", preparedMain);
+            object.put("main_playing", mainPlaying);
+            object.put("overlay_media", currentOverlay);
+            object.put("live_source", currentLive);
+            object.put("blackout", blackoutVisible);
+            object.put("video_scale_mode", videoScaleMode);
+            object.put("live_rotation_degrees", liveRotationDegrees);
+        } catch (Exception ignored) {}
+        return object;
     }
 
     private void handleMainCompletion(String endBehavior) {

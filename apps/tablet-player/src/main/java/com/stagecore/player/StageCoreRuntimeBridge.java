@@ -50,13 +50,29 @@ public final class StageCoreRuntimeBridge {
      */
     public static JSONObject assignedObservedState(String projectId, String snapshotId) {
         TabletManifest manifest = manifest();
+        ManifestExecutor executor = EXECUTOR.get();
+        String manifestId = manifest == null ? "" : safe(manifest.tabletManifestId);
+        JSONObject playerState = executor == null ? new JSONObject() : executor.playerObservedState();
+        return composeAssignedObservedState(
+                safe(projectId),
+                safe(snapshotId),
+                manifestId,
+                playerState);
+    }
+
+    static JSONObject composeAssignedObservedState(
+            String projectId,
+            String snapshotId,
+            String manifestId,
+            JSONObject playerState) {
         JSONObject object = new JSONObject();
         try {
             object.put("project_id", safe(projectId));
             object.put("runtime_snapshot_id", safe(snapshotId));
-            if (manifest != null) {
-                object.put("tablet_manifest_id", safe(manifest.tabletManifestId));
+            if (!safe(manifestId).isEmpty()) {
+                object.put("tablet_manifest_id", safe(manifestId));
             }
+            object.put("player_state", playerState == null ? new JSONObject() : playerState);
         } catch (Exception ignored) {}
         return object;
     }

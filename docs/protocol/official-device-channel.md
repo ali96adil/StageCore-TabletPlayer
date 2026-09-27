@@ -129,6 +129,7 @@ Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and d
 - The tablet never self-asserts a previous Project.
 - The app does not replay previously received PREPARE/PLAY/overlay/live commands.
 - A command interrupted by disconnect is not replayed onto the replacement socket.
+- Every authenticated ACTIVE observation includes typed current tablet player state (main/prepared media, playing flag, overlay, Live source, blackout, scale and Live rotation) nested under `player_state`. It is observational only and cannot authorize replay or correction by itself.
 - Command IDs are fenced while queued/in-flight as well as after terminal completion, so duplicate delivery on the same socket cannot produce a second player side effect. An interrupted pending Live ID is also retained in the bounded completed-ID fence across replacement authority.
 - After an operator has explicitly trusted a StageCore Hub, a runtime/network outage does **not** unlock unauthenticated legacy UDP OSC playback. Legacy OSC remains a pre-trust/debug compatibility path; on-device recovery controls remain separate.
 - `deadline_at` is rechecked on-device immediately before the queued UI/player side effect; an elapsed deadline returns `TIMED_OUT` and does not execute.
