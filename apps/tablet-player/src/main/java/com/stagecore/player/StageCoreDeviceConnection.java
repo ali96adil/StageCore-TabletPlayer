@@ -44,7 +44,7 @@ public final class StageCoreDeviceConnection {
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private final Set<String> completedCommandIds = new LinkedHashSet<>();
+    private final CommandIdTracker commandIds = new CommandIdTracker(128);
 
     private volatile boolean stopped;
     private volatile WebSocket socket;
@@ -574,10 +574,9 @@ public final class StageCoreDeviceConnection {
         }
         JSONObject command = message.getJSONObject("command");
         String commandId = command.getString("command_id");
-        synchronized (completedCommandIds) {
-            if (completedCommandIds.contains(commandId)) return;
+        if (commandId.trim().isEmpty()) {
+            throw new IllegalStateException("command ID is empty");
         }
-        if (isPendingLiveCommand(commandId)) return;
 
         String projectId = command.optString("project_id", "");
         String snapshotId = command.optString("runtime_snapshot_id", "");
@@ -599,7 +598,8 @@ public final class StageCoreDeviceConnection {
         JSONObject payload = command.optJSONObject("payload");
         String manifestId = payload == null ? "" : payload.optString("tablet_manifest_id", "");
         String commandType = command.optString("command_type", "");
-        main.post(() -> {
+        if (!commandIds.claim(commandId)) return;
+        boolean queued = main.post(() -> {
             if (!commandScopeStillCurrent(
                     webSocket,
                     projectId,
@@ -641,10 +641,11 @@ public final class StageCoreDeviceConnection {
                 cancelPendingLiveCommand(webSocket, "Live hidden before first frame");
             }
             CommandResult result = StageCoreRuntimeBridge.execute(commandType, payload);
-            remember(commandId);
+            commandIds.complete(commandId);
             sendResult(webSocket, commandId, result);
             sendObservation(webSocket);
         });
+        if (!queued) commandIds.abandon(commandId);
     }
 
     static boolean commandDeadlineExpired(String deadlineAt, long nowEpochMillis) {
@@ -808,12 +809,19 @@ public final class StageCoreDeviceConnection {
 
     private void invalidatePendingLiveCommand(WebSocket webSocket) {
         boolean hidePendingLive = false;
+        String interruptedCommandId = "";
         synchronized (pendingLiveLock) {
             if (pendingLiveCommandSocket != webSocket) return;
+            interruptedCommandId = pendingLiveCommandId;
             pendingLiveCommandId = "";
             pendingLiveCommandSocket = null;
             pendingLiveToken++;
             hidePendingLive = true;
+        }
+        if (!interruptedCommandId.isEmpty()) {
+            // Treat the interrupted ID as terminal locally so a replacement
+            // socket cannot replay the same command ID after authority changes.
+            commandIds.complete(interruptedCommandId);
         }
         if (hidePendingLive) {
             // A LIVE_SHOW that has not rendered its first frame must not finish
@@ -877,16 +885,6 @@ public final class StageCoreDeviceConnection {
         if (webSocket == null || socket != webSocket) return "";
         String value = socketDeviceId;
         return value == null ? "" : value.trim();
-    }
-
-    private void remember(String commandId) {
-        synchronized (completedCommandIds) {
-            completedCommandIds.add(commandId);
-            while (completedCommandIds.size() > 128) {
-                String first = completedCommandIds.iterator().next();
-                completedCommandIds.remove(first);
-            }
-        }
     }
 
     private void showPairingCode(String code) {
