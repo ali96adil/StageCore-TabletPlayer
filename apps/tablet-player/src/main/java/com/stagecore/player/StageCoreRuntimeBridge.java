@@ -122,6 +122,11 @@ public final class StageCoreRuntimeBridge {
         if (payload == null) payload = new JSONObject();
         switch (commandType) {
             case "TABLET_PREPARE":
+                if (!hasExactlyOneMediaSelector(payload)) {
+                    return CommandResult.rejected(
+                            "MEDIA_SELECTOR_AMBIGUOUS",
+                            "TABLET_PREPARE requires exactly one of tablet_cue_id, tablet_sequence, or media_number");
+                }
                 if (payload.has("tablet_cue_id")) {
                     String cueId = payload.optString("tablet_cue_id", "").trim();
                     return cueId.isEmpty()
@@ -144,6 +149,11 @@ public final class StageCoreRuntimeBridge {
                         "MEDIA_SELECTOR_REQUIRED",
                         "TABLET_PREPARE requires tablet_cue_id, tablet_sequence, or media_number");
             case "TABLET_PLAY":
+                if (!hasExactlyOneMediaSelector(payload)) {
+                    return CommandResult.rejected(
+                            "MEDIA_SELECTOR_AMBIGUOUS",
+                            "TABLET_PLAY requires exactly one of tablet_cue_id, tablet_sequence, or media_number");
+                }
                 if (payload.has("tablet_cue_id")) {
                     String cueId = payload.optString("tablet_cue_id", "").trim();
                     return cueId.isEmpty()
@@ -216,6 +226,15 @@ public final class StageCoreRuntimeBridge {
             return executor.showLiveUrlAsync(directUrl, listener);
         }
         return executor.showLiveAsync(mediaKey, listener);
+    }
+
+    static boolean hasExactlyOneMediaSelector(JSONObject payload) {
+        if (payload == null) return false;
+        int count = 0;
+        if (payload.has("tablet_cue_id")) count++;
+        if (payload.has("tablet_sequence")) count++;
+        if (payload.has("media_number")) count++;
+        return count == 1;
     }
 
     static boolean isAllowedDirectLiveUrl(String value) {
