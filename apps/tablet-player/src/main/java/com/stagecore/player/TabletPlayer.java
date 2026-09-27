@@ -17,11 +17,12 @@ import android.widget.TextView;
 import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.TabletAction;
 
-import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public final class TabletPlayer {
     private final Context context;
@@ -362,19 +363,17 @@ public final class TabletPlayer {
      * Typed, current player state for authenticated StageCore observation.
      * This is observational only: it does not grant command/replay authority.
      */
-    public JSONObject observedStateJson() {
-        JSONObject object = new JSONObject();
-        try {
-            object.put("main_media", currentMain);
-            object.put("prepared_main_media", preparedMain);
-            object.put("main_playing", mainPlaying);
-            object.put("overlay_media", currentOverlay);
-            object.put("live_source", currentLive);
-            object.put("blackout", blackoutVisible);
-            object.put("video_scale_mode", videoScaleMode);
-            object.put("live_rotation_degrees", liveRotationDegrees);
-        } catch (Exception ignored) {}
-        return object;
+    public Map<String, Object> observedStateValues() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("main_media", currentMain);
+        values.put("prepared_main_media", preparedMain);
+        values.put("main_playing", mainPlaying);
+        values.put("overlay_media", currentOverlay);
+        values.put("live_source", currentLive);
+        values.put("blackout", blackoutVisible);
+        values.put("video_scale_mode", videoScaleMode);
+        values.put("live_rotation_degrees", liveRotationDegrees);
+        return values;
     }
 
     private void handleMainCompletion(String endBehavior) {

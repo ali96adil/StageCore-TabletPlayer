@@ -7,6 +7,9 @@ import com.stagecore.player.model.TabletManifest;
 import org.json.JSONObject;
 
 import java.net.URI;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -52,29 +55,32 @@ public final class StageCoreRuntimeBridge {
         TabletManifest manifest = manifest();
         ManifestExecutor executor = EXECUTOR.get();
         String manifestId = manifest == null ? "" : safe(manifest.tabletManifestId);
-        JSONObject playerState = executor == null ? new JSONObject() : executor.playerObservedState();
-        return composeAssignedObservedState(
+        Map<String, Object> playerState = executor == null
+                ? Collections.emptyMap()
+                : executor.playerObservedStateValues();
+        return new JSONObject(composeAssignedObservedStateValues(
                 safe(projectId),
                 safe(snapshotId),
                 manifestId,
-                playerState);
+                playerState));
     }
 
-    static JSONObject composeAssignedObservedState(
+    static Map<String, Object> composeAssignedObservedStateValues(
             String projectId,
             String snapshotId,
             String manifestId,
-            JSONObject playerState) {
-        JSONObject object = new JSONObject();
-        try {
-            object.put("project_id", safe(projectId));
-            object.put("runtime_snapshot_id", safe(snapshotId));
-            if (!safe(manifestId).isEmpty()) {
-                object.put("tablet_manifest_id", safe(manifestId));
-            }
-            object.put("player_state", playerState == null ? new JSONObject() : playerState);
-        } catch (Exception ignored) {}
-        return object;
+            Map<String, Object> playerState) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("project_id", safe(projectId));
+        values.put("runtime_snapshot_id", safe(snapshotId));
+        if (!safe(manifestId).isEmpty()) {
+            values.put("tablet_manifest_id", safe(manifestId));
+        }
+        values.put("player_state",
+                playerState == null
+                        ? Collections.emptyMap()
+                        : new LinkedHashMap<>(playerState));
+        return values;
     }
 
     public static JSONObject observedState() {

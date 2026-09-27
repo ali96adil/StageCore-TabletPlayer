@@ -2,8 +2,10 @@ package com.stagecore.player;
 
 import com.stagecore.player.model.CommandStatus;
 
-import org.json.JSONObject;
 import org.junit.Test;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -42,26 +44,27 @@ public final class StageCoreRuntimeBridgeTest {
     }
 
     @Test
-    public void assignedObservationKeepsHubScopeSeparateFromTypedPlayerState() throws Exception {
-        JSONObject player = new JSONObject()
-                .put("main_media", "actor-01.mp4")
-                .put("main_playing", true)
-                .put("live_source", "http://192.168.3.130:9081/api/v0/stream")
-                .put("blackout", false);
+    public void assignedObservationKeepsHubScopeSeparateFromTypedPlayerState() {
+        Map<String, Object> player = new LinkedHashMap<>();
+        player.put("main_media", "actor-01.mp4");
+        player.put("main_playing", true);
+        player.put("live_source", "http://192.168.3.130:9081/api/v0/stream");
+        player.put("blackout", false);
 
-        JSONObject observed = StageCoreRuntimeBridge.composeAssignedObservedState(
+        Map<String, Object> observed = StageCoreRuntimeBridge.composeAssignedObservedStateValues(
                 "project-b",
                 "snapshot-b",
                 "tablet-manifest-01",
                 player);
 
-        assertEquals("project-b", observed.getString("project_id"));
-        assertEquals("snapshot-b", observed.getString("runtime_snapshot_id"));
-        assertEquals("tablet-manifest-01", observed.getString("tablet_manifest_id"));
-        JSONObject typed = observed.getJSONObject("player_state");
-        assertEquals("actor-01.mp4", typed.getString("main_media"));
-        assertTrue(typed.getBoolean("main_playing"));
-        assertFalse(typed.getBoolean("blackout"));
+        assertEquals("project-b", observed.get("project_id"));
+        assertEquals("snapshot-b", observed.get("runtime_snapshot_id"));
+        assertEquals("tablet-manifest-01", observed.get("tablet_manifest_id"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> typed = (Map<String, Object>) observed.get("player_state");
+        assertEquals("actor-01.mp4", typed.get("main_media"));
+        assertEquals(Boolean.TRUE, typed.get("main_playing"));
+        assertEquals(Boolean.FALSE, typed.get("blackout"));
     }
 
 }
