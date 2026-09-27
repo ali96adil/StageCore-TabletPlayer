@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.OkHttpClient;
@@ -53,7 +54,7 @@ public final class StageCoreDeviceConnection {
     private volatile String assignedProjectId = "";
     private volatile String assignedRuntimeSnapshotId = "";
     private volatile boolean runtimeAuthorityReady;
-    private volatile long reconnectGeneration;
+    private final AtomicLong reconnectGeneration = new AtomicLong();
 
     private final Object pendingLiveLock = new Object();
     private String pendingLiveCommandId = "";
@@ -89,7 +90,7 @@ public final class StageCoreDeviceConnection {
     }
 
     public void reconnectNow(String reason) {
-        reconnectGeneration++;
+        reconnectGeneration.incrementAndGet();
         pendingPairingCode = "";
         clearRuntimeScope("RECONNECTING");
         WebSocket current = socket;
@@ -104,7 +105,7 @@ public final class StageCoreDeviceConnection {
     private void connectionLoop() {
         long backoffMs = 1000;
         while (!stopped) {
-            final long attemptGeneration = reconnectGeneration;
+            final long attemptGeneration = reconnectGeneration.get();
             try {
                 AppSettings settings = AppSettings.load(context);
                 if (settings.serverHost == null || settings.serverHost.trim().isEmpty()) {
@@ -142,7 +143,7 @@ public final class StageCoreDeviceConnection {
                             descriptor.baselineCapabilities());
                     pendingPairingCode = receipt.pairingCode;
                     showPairingCode(receipt.pairingCode);
-                    while (!stopped && attemptGeneration == reconnectGeneration) {
+                    while (!stopped && attemptGeneration == reconnectGeneration.get()) {
                         String state = pairing.pairingStatus(baseUrl, receipt);
                         lastStatus = "PAIRING_" + state;
                         if ("APPROVED".equals(state)) break;
@@ -153,7 +154,7 @@ public final class StageCoreDeviceConnection {
                         sleep(1500);
                     }
                     if (stopped) return;
-                    if (attemptGeneration != reconnectGeneration) {
+                    if (attemptGeneration != reconnectGeneration.get()) {
                         pendingPairingCode = "";
                         lastStatus = "RECONNECTING";
                         backoffMs = 1000;
@@ -162,7 +163,7 @@ public final class StageCoreDeviceConnection {
                     pendingPairingCode = "";
                     session = pairing.authenticate(baseUrl);
                 }
-                if (attemptGeneration != reconnectGeneration) {
+                if (attemptGeneration != reconnectGeneration.get()) {
                     pendingPairingCode = "";
                     lastStatus = "RECONNECTING";
                     backoffMs = 1000;
