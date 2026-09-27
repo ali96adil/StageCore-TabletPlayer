@@ -92,6 +92,7 @@ public final class StageCoreDeviceConnection {
         clearRuntimeScope("RECONNECTING");
         WebSocket current = socket;
         if (current != null) {
+            invalidatePendingLiveCommand(current);
             current.close(1012, reason == null || reason.trim().isEmpty()
                     ? "tablet settings changed"
                     : reason.trim());
@@ -601,11 +602,20 @@ public final class StageCoreDeviceConnection {
     }
 
     private void invalidatePendingLiveCommand(WebSocket webSocket) {
+        boolean hidePendingLive = false;
         synchronized (pendingLiveLock) {
             if (pendingLiveCommandSocket != webSocket) return;
             pendingLiveCommandId = "";
             pendingLiveCommandSocket = null;
             pendingLiveToken++;
+            hidePendingLive = true;
+        }
+        if (hidePendingLive) {
+            // A LIVE_SHOW that has not rendered its first frame must not finish
+            // later under a replacement socket/Project scope. Release only that
+            // in-flight Live attempt; already-completed Live remains untouched.
+            main.post(() -> StageCoreRuntimeBridge.execute(
+                    "TABLET_LIVE_HIDE", new JSONObject()));
         }
     }
 

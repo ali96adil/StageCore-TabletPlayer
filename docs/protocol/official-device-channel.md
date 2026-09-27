@@ -118,7 +118,7 @@ For Live playback the tablet sends the terminal result only when:
 - the first-frame deadline expires: `TIMED_OUT` and the Live layer is released; or
 - an explicit `TABLET_LIVE_HIDE` cancels an in-progress first-frame wait: `CANCELLED`.
 
-Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and do not create multiple terminal command results. A socket disconnect invalidates the local pending callback; the Hub owns the interrupted-command result for that connection.
+Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and do not create multiple terminal command results. A socket disconnect invalidates the local pending callback **and releases a LIVE_SHOW that is still waiting for its first frame**, so a delayed frame from the old command cannot appear under replacement socket/Project authority. An already-completed Live surface is left untouched for show continuity. The Hub owns the interrupted-command result for the disconnected connection.
 
 ## Reconnect semantics
 
@@ -128,6 +128,7 @@ Transient MJPEG read errors stay inside the bounded reconnect/backoff loop and d
 - The tablet never self-asserts a previous Project.
 - The app does not replay previously received PREPARE/PLAY/overlay/live commands.
 - A command interrupted by disconnect is not replayed onto the replacement socket.
+- A pending Live command that has not produced its first frame is locally cancelled/hidden on disconnect; it cannot render later after authority changes.
 - Every replacement socket must repeat the ACTIVE scope acknowledgment before commands are enabled.
 
 ## Safe failure behavior
