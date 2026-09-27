@@ -92,6 +92,14 @@ public final class StageCoreDeviceConnection {
         return runtimeAuthorityReady && "ACTIVE".equals(assignmentState);
     }
 
+    /**
+     * Local/legacy playback must yield as soon as the authenticated StageCore
+     * runtime channel is open, including the pre-READY assignment/scope window.
+     */
+    public boolean ownsPlaybackAuthority() {
+        return !stopped && socket != null;
+    }
+
     public void reconnectNow(String reason) {
         reconnectGeneration.incrementAndGet();
         pendingPairingCode = "";

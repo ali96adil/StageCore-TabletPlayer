@@ -127,8 +127,8 @@ public final class LegacyOscServer {
         android.util.Log.i("StageCorePlayer", "OSC " + a + " -> " + result);
     }
 
-    static boolean legacyOscAllowed(boolean stageCoreRuntimeReady) {
-        return !stageCoreRuntimeReady;
+    static boolean legacyOscAllowed(boolean stageCoreOwnsPlayback) {
+        return !stageCoreOwnsPlayback;
     }
 
     private OscMessage parse(byte[] data, int length) {

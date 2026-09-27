@@ -780,13 +780,13 @@ public final class MainActivity extends Activity {
 
     private boolean stageCoreOwnsPlayback() {
         StageCoreDeviceConnection connection = officialDeviceConnection();
-        return connection != null && connection.runtimeReady();
+        return connection != null && connection.ownsPlaybackAuthority();
     }
 
     private CommandResult localPlaybackAuthorityRejected() {
         return CommandResult.rejected(
                 "STAGECORE_AUTHORITY_ACTIVE",
-                "Local playback controls are disabled while the authenticated StageCore runtime is READY");
+                "Local playback controls are disabled while the authenticated StageCore runtime channel is connected");
     }
 
     private void runLocalPlaybackAction(String actionName, LocalPlaybackAction action) {

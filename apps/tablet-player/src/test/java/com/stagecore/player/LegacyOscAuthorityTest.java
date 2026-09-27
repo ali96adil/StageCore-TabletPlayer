@@ -7,7 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 public final class LegacyOscAuthorityTest {
     @Test
-    public void legacyOscIsRehearsalOnlyWhenStageCoreOwnsPlayback() {
+    public void legacyOscYieldsWheneverStageCoreOwnsPlayback() {
         assertTrue(LegacyOscServer.legacyOscAllowed(false));
         assertFalse(LegacyOscServer.legacyOscAllowed(true));
     }
