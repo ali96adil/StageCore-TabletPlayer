@@ -3,6 +3,7 @@ package com.stagecore.player;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -23,14 +24,20 @@ public final class StageCoreDiscovery {
     };
 
     private final NsdManager nsdManager;
+    private final WifiManager wifiManager;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final java.util.List<NsdManager.DiscoveryListener> listeners = new java.util.ArrayList<>();
     private final AtomicLong discoveryGeneration = new AtomicLong();
     private volatile boolean running = false;
+    private WifiManager.MulticastLock multicastLock;
 
     public StageCoreDiscovery(Context context) {
-        Object service = context.getSystemService(Context.NSD_SERVICE);
+        Context appContext = context.getApplicationContext();
+        Context serviceContext = appContext == null ? context : appContext;
+        Object service = serviceContext.getSystemService(Context.NSD_SERVICE);
         nsdManager = service instanceof NsdManager ? (NsdManager) service : null;
+        Object wifiService = serviceContext.getSystemService(Context.WIFI_SERVICE);
+        wifiManager = wifiService instanceof WifiManager ? (WifiManager) wifiService : null;
     }
 
     public void start(Callback callback) {
@@ -41,6 +48,7 @@ public final class StageCoreDiscovery {
         }
         final long generation = discoveryGeneration.incrementAndGet();
         running = true;
+        acquireMulticastLock(callback, generation);
         for (String serviceType : SERVICE_TYPES) {
             NsdManager.DiscoveryListener listener = listenerFor(serviceType, callback, generation);
             listeners.add(listener);
@@ -67,6 +75,40 @@ public final class StageCoreDiscovery {
             }
         }
         listeners.clear();
+        releaseMulticastLock();
+    }
+
+    private synchronized void acquireMulticastLock(Callback callback, long generation) {
+        releaseMulticastLock();
+        if (wifiManager == null) return;
+        try {
+            WifiManager.MulticastLock lock =
+                    wifiManager.createMulticastLock("stagecore-hub-discovery");
+            lock.setReferenceCounted(false);
+            lock.acquire();
+            multicastLock = lock;
+        } catch (RuntimeException error) {
+            multicastLock = null;
+            // Newer Android releases can manage foreground NSD multicast
+            // automatically. Keep discovery running, but surface the bounded
+            // diagnostic because older releases may require this lock.
+            statusIfCurrent(
+                    callback,
+                    generation,
+                    "تعذر تثبيت استقبال mDNS عبر Wi-Fi؛ سيستمر البحث بالنظام: "
+                            + error.getClass().getSimpleName());
+        }
+    }
+
+    private synchronized void releaseMulticastLock() {
+        WifiManager.MulticastLock lock = multicastLock;
+        multicastLock = null;
+        if (lock == null) return;
+        try {
+            if (lock.isHeld()) lock.release();
+        } catch (RuntimeException ignored) {
+            // Discovery teardown must remain idempotent.
+        }
     }
 
     private NsdManager.DiscoveryListener listenerFor(
