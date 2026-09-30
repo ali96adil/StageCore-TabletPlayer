@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.Locale;
-import java.util.UUID;
 
 public final class AppSettings {
     private static final String PREFS = "stagecore-player";
@@ -68,9 +67,13 @@ public final class AppSettings {
         synchronized (AppSettings.class) {
             String stored = prefs.getString("device_id", null);
             if (stored != null && !stored.trim().isEmpty()) {
-                return stored.trim();
+                String normalized = StageCoreDeviceId.normalizeGenerated(stored);
+                if (!normalized.equals(stored.trim())) {
+                    prefs.edit().putString("device_id", normalized).apply();
+                }
+                return normalized;
             }
-            String generated = "tablet-" + UUID.randomUUID();
+            String generated = StageCoreDeviceId.generate();
             // SharedPreferences.apply() updates the in-memory map synchronously.
             // The lock ensures another process-local loader cannot generate a
             // different identity before that update becomes visible.
@@ -80,7 +83,8 @@ public final class AppSettings {
     }
 
     public void save(Context context) {
-        deviceId = nonBlank(deviceId, "tablet-" + UUID.randomUUID());
+        deviceId = StageCoreDeviceId.normalizeGenerated(
+                nonBlank(deviceId, StageCoreDeviceId.generate()));
         deviceName = nonBlank(deviceName, "Tablet " + suffix(deviceId));
         serverHost = serverHost == null ? "" : serverHost.trim();
         serverPort = clamp(serverPort, 1, 65535);

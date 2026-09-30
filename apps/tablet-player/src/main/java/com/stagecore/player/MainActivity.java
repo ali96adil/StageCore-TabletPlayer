@@ -595,7 +595,7 @@ public final class MainActivity extends Activity {
     }
 
     private void regenerateDeviceId() {
-        appSettings.deviceId = "tablet-" + java.util.UUID.randomUUID();
+        appSettings.deviceId = StageCoreDeviceId.generate();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         requestDeviceReconnect("Tablet identity regenerated");
