@@ -48,14 +48,21 @@ jobs:
             cd "$OUT"
             sha256sum tablet-player-debug.apk > SHA256SUMS
           )
+          VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)$/\1/p' apps/tablet-player/build.gradle.kts | head -1)"
+          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"$/\1/p' apps/tablet-player/build.gradle.kts | head -1)"
+          test -n "$VERSION_CODE"
+          test -n "$VERSION_NAME"
+          EXPECTED_VERSION_NAME="${VERSION_NAME}-mjpegtrial-${EXPECTED_SHA:0:12}"
           {
             echo "source_revision=$EXPECTED_SHA"
-            echo "version_name=1.0.0-rc3-mjpegtrial-${EXPECTED_SHA:0:12}"
+            echo "version_code=$VERSION_CODE"
+            echo "version_name=$EXPECTED_VERSION_NAME"
             echo "application_id=com.stagecore.player.mjpegtrial"
           } > "$OUT/BUILDINFO"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT/tablet-player-debug.apk" \
             | tee "$OUT/AAPT_BADGING.txt"
-          grep -F "versionName='1.0.0-rc3-mjpegtrial-${EXPECTED_SHA:0:12}'" "$OUT/AAPT_BADGING.txt"
+          grep -F "versionCode='$VERSION_CODE'" "$OUT/AAPT_BADGING.txt"
+          grep -F "versionName='$EXPECTED_VERSION_NAME'" "$OUT/AAPT_BADGING.txt"
           grep -F "package: name='com.stagecore.player.mjpegtrial'" "$OUT/AAPT_BADGING.txt"
       - name: Upload tablet player debug APK
         uses: actions/upload-artifact@v4
