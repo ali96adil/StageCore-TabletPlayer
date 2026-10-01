@@ -11,6 +11,7 @@ jobs:
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       STAGECORE_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      EXPECTED_DEBUG_CERT_SHA256: 7890a66e03e4a75f241fa9b767ead56f459a588e2e5a78f8f8f05f2a3aa3070d
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,10 +30,16 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: stagecore-tablet-debug-keystore-v2
+      - name: Materialize stable debug signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/stagecore-tablet-debug.keystore"
+          test -s .github/ci/stagecore-tablet-debug.keystore.b64
+          base64 --decode .github/ci/stagecore-tablet-debug.keystore.b64 > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass android -alias stagecoredebug >/dev/null
+          echo "STAGECORE_DEBUG_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
@@ -48,6 +55,9 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$OUT"
           cp "$APK" "$OUT/tablet-player-debug.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$OUT/tablet-player-debug.apk" \
+            | tee "$OUT/APKSIGNER_CERTS.txt"
+          grep -F "Signer #1 certificate SHA-256 digest: $EXPECTED_DEBUG_CERT_SHA256" "$OUT/APKSIGNER_CERTS.txt"
           (
             cd "$OUT"
             sha256sum tablet-player-debug.apk > SHA256SUMS
@@ -62,6 +72,7 @@ jobs:
             echo "version_code=$VERSION_CODE"
             echo "version_name=$EXPECTED_VERSION_NAME"
             echo "application_id=com.stagecore.player.mjpegtrial"
+            echo "signing_certificate_sha256=$EXPECTED_DEBUG_CERT_SHA256"
           } > "$OUT/BUILDINFO"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT/tablet-player-debug.apk" \
             | tee "$OUT/AAPT_BADGING.txt"
