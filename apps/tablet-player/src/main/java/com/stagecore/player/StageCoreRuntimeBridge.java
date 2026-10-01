@@ -13,12 +13,27 @@ import java.util.concurrent.atomic.AtomicReference;
  * Transport never owns playback state; it only forwards validated commands.
  */
 public final class StageCoreRuntimeBridge {
+    public interface SettingsExecutor {
+        CommandResult setBrightnessPercent(int percent);
+        CommandResult setShowMode(boolean enabled);
+        JSONObject observedHealth();
+    }
+
     private static final AtomicReference<ManifestExecutor> EXECUTOR = new AtomicReference<>();
+    private static final AtomicReference<SettingsExecutor> SETTINGS_EXECUTOR = new AtomicReference<>();
 
     private StageCoreRuntimeBridge() {}
 
     public static void register(ManifestExecutor executor) {
         EXECUTOR.set(executor);
+    }
+
+    public static void registerSettings(SettingsExecutor executor) {
+        SETTINGS_EXECUTOR.set(executor);
+    }
+
+    public static void unregisterSettings(SettingsExecutor executor) {
+        SETTINGS_EXECUTOR.compareAndSet(executor, null);
     }
 
     public static boolean isReady() {
@@ -44,6 +59,11 @@ public final class StageCoreRuntimeBridge {
                 object.put("project_id", safe(manifest.stageCoreProjectId));
                 object.put("runtime_snapshot_id", safe(manifest.runtimeSnapshotId));
                 object.put("tablet_manifest_id", safe(manifest.tabletManifestId));
+            }
+            SettingsExecutor settings = SETTINGS_EXECUTOR.get();
+            if (settings != null) {
+                JSONObject health = settings.observedHealth();
+                if (health != null) object.put("health", health);
             }
         } catch (Exception ignored) {}
         return object;
@@ -112,6 +132,22 @@ public final class StageCoreRuntimeBridge {
             case "TABLET_OVERLAY_CLEAR": return executor.hideOverlay(payload.optLong("dissolve_ms", 0));
             case "TABLET_LIVE_SHOW": return executor.showLive(payload.optString("media_key", ""));
             case "TABLET_LIVE_HIDE": return executor.hideLive();
+            case "TABLET_BRIGHTNESS_SET": {
+                SettingsExecutor settings = SETTINGS_EXECUTOR.get();
+                if (settings == null) return CommandResult.failed("SETTINGS_NOT_READY", "Tablet settings controller is not ready");
+                if (!payload.has("brightness_percent")) return CommandResult.rejected("INVALID_BRIGHTNESS", "brightness_percent is required");
+                int percent = payload.optInt("brightness_percent", -1);
+                if (percent < 5 || percent > 100) return CommandResult.rejected("INVALID_BRIGHTNESS", "brightness_percent must be 5..100");
+                return settings.setBrightnessPercent(percent);
+            }
+            case "TABLET_SHOW_MODE_SET": {
+                SettingsExecutor settings = SETTINGS_EXECUTOR.get();
+                if (settings == null) return CommandResult.failed("SETTINGS_NOT_READY", "Tablet settings controller is not ready");
+                if (!payload.has("show_mode") || !(payload.opt("show_mode") instanceof Boolean)) {
+                    return CommandResult.rejected("INVALID_SHOW_MODE", "show_mode boolean is required");
+                }
+                return settings.setShowMode(payload.optBoolean("show_mode"));
+            }
             default: return CommandResult.rejected("UNSUPPORTED_COMMAND", "Unsupported StageCore command " + commandType);
         }
     }

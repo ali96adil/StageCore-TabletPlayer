@@ -32,7 +32,9 @@ import com.stagecore.player.model.TabletAction;
 import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
-public final class MainActivity extends Activity {
+import org.json.JSONObject;
+
+public final class MainActivity extends Activity implements StageCoreRuntimeBridge.SettingsExecutor {
     private TabletPlayer player;
     private ManifestStore manifestStore;
     private ManifestExecutor executor;
@@ -98,6 +100,7 @@ public final class MainActivity extends Activity {
             @Override public String appMode() { return controlsVisible() ? "SETTINGS" : "SHOW"; }
             @Override public String lastError() { return lastError; }
         });
+        StageCoreRuntimeBridge.registerSettings(this);
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -156,6 +159,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        StageCoreRuntimeBridge.unregisterSettings(this);
         if (heartbeatReporter != null) heartbeatReporter.stop();
         if (oscServer != null) oscServer.stop();
         if (discovery != null) discovery.stop();
@@ -765,6 +769,33 @@ public final class MainActivity extends Activity {
         boolean ready = hasPermission && scan.contains("النواقص: 0");
         readinessBadge.setText(ready ? "جاهزية العرض: READY ✅" : "جاهزية العرض: تحتاج فحص ⚠️");
         readinessBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
+    }
+
+    @Override
+    public CommandResult setBrightnessPercent(int percent) {
+        if (percent < 5 || percent > 100) {
+            return CommandResult.rejected("INVALID_BRIGHTNESS", "Brightness must be between 5 and 100 percent");
+        }
+        appSettings.brightnessPercent = percent;
+        appSettings.save(this);
+        applyScreenBrightness(percent);
+        if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + percent + "%");
+        updateStatusHeader();
+        pokeHeartbeat();
+        return CommandResult.completed("Brightness applied: " + percent + "%");
+    }
+
+    @Override
+    public CommandResult setShowMode(boolean enabled) {
+        setControlsVisible(!enabled);
+        applyShowLockSurface();
+        pokeHeartbeat();
+        return CommandResult.completed(enabled ? "Show Mode enabled" : "Show Mode disabled");
+    }
+
+    @Override
+    public JSONObject observedHealth() {
+        return heartbeatReporter == null ? new JSONObject() : heartbeatReporter.authenticatedHealthSnapshot();
     }
 
     private void applyScreenBrightness(int percent) {

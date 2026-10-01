@@ -24,11 +24,14 @@ public final class StageCoreClientTest {
                 "tablet.media.overlay.play",
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
-                "tablet.media.live.hide"
+                "tablet.media.live.hide",
+                "tablet.settings.brightness.set",
+                "tablet.settings.show_mode.set"
         ), capabilities);
 
         assertFalse(capabilities.contains("tablet.media.select"));
-        assertFalse(capabilities.stream().anyMatch(value -> value.startsWith("tablet.settings.")));
+        assertFalse(capabilities.contains("tablet.settings.apply"));
+        assertFalse(capabilities.contains("tablet.settings.reset"));
         assertFalse(capabilities.contains("tablet.permissions.check"));
         assertFalse(capabilities.contains("tablet.media.scan"));
         assertFalse(capabilities.contains("tablet.media.prepare_folder"));

@@ -12,6 +12,8 @@ import android.os.Environment;
 
 import com.stagecore.player.model.TabletManifest;
 
+import org.json.JSONObject;
+
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -106,6 +108,24 @@ public final class TabletHeartbeatReporter {
                 + json("player_state", safeSnapshot("player_state", provider::playerState)) + ","
                 + json("last_error", safeSnapshot("last_error", provider::lastError))
                 + "}";
+    }
+
+    public JSONObject authenticatedHealthSnapshot() {
+        JSONObject health = new JSONObject();
+        try {
+            AppSettings settings = provider.settings();
+            Battery battery = readBattery();
+            health.put("battery_percent", battery.percent);
+            health.put("battery_charging", battery.charging);
+            health.put("power_save", isPowerSaveMode());
+            health.put("brightness_percent", settings == null ? -1 : settings.brightnessPercent);
+            health.put("orientation_mode", settings == null ? "" : settings.orientationMode);
+            health.put("video_scale_mode", settings == null ? "" : settings.videoScaleMode);
+            health.put("show_mode", "SHOW".equalsIgnoreCase(safeSnapshot("app_mode", provider::appMode)));
+            health.put("show_mode_on_launch", settings != null && settings.showModeOnLaunch);
+            health.put("show_lock_enabled", settings != null && settings.showLockEnabled);
+        } catch (Exception ignored) {}
+        return health;
     }
 
     private void sendUdp(String host, int port, String payload) {

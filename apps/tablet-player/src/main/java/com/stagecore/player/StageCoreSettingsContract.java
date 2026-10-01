@@ -16,6 +16,8 @@ public final class StageCoreSettingsContract {
     public static final String COMMAND_SETTINGS_APPLY = "tablet.settings.apply";
     public static final String COMMAND_SETTINGS_READ = "tablet.settings.read";
     public static final String COMMAND_SETTINGS_RESET = "tablet.settings.reset";
+    public static final String COMMAND_BRIGHTNESS_SET = "TABLET_BRIGHTNESS_SET";
+    public static final String COMMAND_SHOW_MODE_SET = "TABLET_SHOW_MODE_SET";
     public static final String COMMAND_MEDIA_SCAN = "tablet.media.scan";
     public static final String COMMAND_MEDIA_PREPARE_FOLDER = "tablet.media.prepare_folder";
     public static final String COMMAND_PERMISSIONS_CHECK = "tablet.permissions.check";
