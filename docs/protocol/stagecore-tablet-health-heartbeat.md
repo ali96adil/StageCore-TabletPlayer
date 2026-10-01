@@ -1,8 +1,12 @@
 # StageCore Tablet Health Heartbeat Foundation
 
-## V1 transport status
+## Transport status
 
-The existing UDP heartbeat remains a rehearsal/status compatibility path. Tablet Player V1 RC3 does **not** advertise `tablet.health.*` as executable Stage Device capabilities. The authenticated production channel reports runtime state with `device.observation`; periodic authenticated health telemetry can be added later without pretending an unsupported command exists.
+The existing UDP heartbeat remains a rehearsal/status compatibility path and does not grant command authority.
+
+Tablet Player rc5 also publishes lightweight health telemetry through the authenticated `stagecore.device/2` `device.observation` path. The v2 observation is sent on important runtime changes and every 10 seconds while the authenticated WebSocket remains current. Health is nested under `observed_state.health` and remains observational only.
+
+Current authenticated fields include `battery_percent`, `battery_charging`, `power_save`, `brightness_percent`, `orientation_mode`, `show_lock_enabled`, `show_mode_on_launch`, `keep_screen_awake`, and `observed_at_ms`.
 
 ## Purpose
 
@@ -41,9 +45,12 @@ Each heartbeat should include:
   "brightness_percent": 85,
   "orientation_mode": "PORTRAIT",
   "video_scale_mode": "CROP",
+  "assignment_state": "ACTIVE",
   "project_id": "...",
   "runtime_snapshot_id": "...",
   "tablet_manifest_id": "...",
+  "local_manifest_project_id": "...",
+  "local_manifest_runtime_snapshot_id": "...",
   "media_readiness": "READY",
   "missing_media": [],
   "permission_state": "OK",
@@ -103,3 +110,12 @@ tablet.settings.apply
 ```
 
 StageCore can use heartbeat data for a dashboard, but final readiness should still be confirmed by explicit `tablet.media.scan` before the show starts.
+
+
+### v2 authority note
+
+For `stagecore.device/2`, the heartbeat's `project_id` and `runtime_snapshot_id` are observational mirrors of the **current authenticated Hub-owned ACTIVE assignment**. They are `unknown` when that authority is not READY/ACTIVE. They must never be populated from legacy Project/Snapshot fields inside `tablet_manifest.json`.
+
+The local manifest values remain available only under the explicitly non-authoritative `local_manifest_project_id` and `local_manifest_runtime_snapshot_id` diagnostic fields. This prevents a reused tablet from advertising Project A as current after the Hub has assigned it to Project B.
+
+The UDP heartbeat remains best-effort rehearsal/status telemetry and never grants command authority.

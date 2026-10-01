@@ -3,7 +3,6 @@ package com.stagecore.player;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 
 public final class StageCoreClient {
     public static final String PROTOCOL = "stagecore.device/2";
@@ -18,9 +17,9 @@ public final class StageCoreClient {
 
     public StageCoreClient(String storedDeviceId, String storedDeviceName) {
         if (storedDeviceId == null || storedDeviceId.trim().isEmpty()) {
-            this.deviceId = "tablet-" + UUID.randomUUID();
+            this.deviceId = StageCoreDeviceId.generate();
         } else {
-            this.deviceId = storedDeviceId.trim();
+            this.deviceId = StageCoreDeviceId.normalizeGenerated(storedDeviceId);
         }
         if (storedDeviceName == null || storedDeviceName.trim().isEmpty()) {
             this.deviceName = "StageCore Tablet";

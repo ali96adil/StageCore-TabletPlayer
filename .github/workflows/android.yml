@@ -8,8 +8,19 @@ on:
 jobs:
   tablet-player:
     runs-on: ubuntu-latest
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      STAGECORE_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      EXPECTED_DEBUG_CERT_SHA256: 7890a66e03e4a75f241fa9b767ead56f459a588e2e5a78f8f8f05f2a3aa3070d
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+      - name: Verify exact source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -19,18 +30,58 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: stagecore-tablet-debug-keystore-v2
+      - name: Materialize stable debug signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/stagecore-tablet-debug.keystore"
+          test -s .github/ci/stagecore-tablet-debug.keystore.b64
+          base64 --decode .github/ci/stagecore-tablet-debug.keystore.b64 > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storepass android -alias stagecoredebug >/dev/null
+          echo "STAGECORE_DEBUG_KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
       - name: Test and build tablet player debug APK
         run: gradle :apps:tablet-player:testDebugUnitTest :apps:tablet-player:assembleDebug --no-daemon
+      - name: Verify and stage exact APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find apps/tablet-player/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          OUT="$RUNNER_TEMP/tablet-player-artifact"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          cp "$APK" "$OUT/tablet-player-debug.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$OUT/tablet-player-debug.apk" \
+            | tee "$OUT/APKSIGNER_CERTS.txt"
+          grep -F "Signer #1 certificate SHA-256 digest: $EXPECTED_DEBUG_CERT_SHA256" "$OUT/APKSIGNER_CERTS.txt"
+          (
+            cd "$OUT"
+            sha256sum tablet-player-debug.apk > SHA256SUMS
+          )
+          VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)$/\1/p' apps/tablet-player/build.gradle.kts | head -1)"
+          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"$/\1/p' apps/tablet-player/build.gradle.kts | head -1)"
+          test -n "$VERSION_CODE"
+          test -n "$VERSION_NAME"
+          EXPECTED_VERSION_NAME="${VERSION_NAME}-mjpegtrial-${EXPECTED_SHA:0:12}"
+          {
+            echo "source_revision=$EXPECTED_SHA"
+            echo "version_code=$VERSION_CODE"
+            echo "version_name=$EXPECTED_VERSION_NAME"
+            echo "application_id=com.stagecore.player.mjpegtrial"
+            echo "signing_certificate_sha256=$EXPECTED_DEBUG_CERT_SHA256"
+          } > "$OUT/BUILDINFO"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$OUT/tablet-player-debug.apk" \
+            | tee "$OUT/AAPT_BADGING.txt"
+          grep -F "versionCode='$VERSION_CODE'" "$OUT/AAPT_BADGING.txt"
+          grep -F "versionName='$EXPECTED_VERSION_NAME'" "$OUT/AAPT_BADGING.txt"
+          grep -F "package: name='com.stagecore.player.mjpegtrial'" "$OUT/AAPT_BADGING.txt"
       - name: Upload tablet player debug APK
         uses: actions/upload-artifact@v4
         with:
           name: stagecore-player-debug-apk
-          path: apps/tablet-player/build/outputs/apk/debug/*.apk
+          path: ${{ runner.temp }}/tablet-player-artifact/
           if-no-files-found: error

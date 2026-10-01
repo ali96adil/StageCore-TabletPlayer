@@ -8,6 +8,8 @@ import com.stagecore.player.model.TabletCue;
 import com.stagecore.player.model.TabletManifest;
 
 import java.io.File;
+import java.util.Collections;
+import java.util.Map;
 
 public final class ManifestExecutor {
     private final ManifestStore manifestStore;
@@ -40,6 +42,26 @@ public final class ManifestExecutor {
             return CommandResult.rejected("MANIFEST_MISMATCH", "Command tablet manifest does not match active tablet manifest");
         }
         return CommandResult.completed("Scope accepted");
+    }
+
+    /**
+     * stagecore.device/2 Project/Snapshot authority belongs to the Hub
+     * assignment, not to legacy fields embedded in a local media manifest.
+     * The local manifest may still be checked as an optional content hint.
+     */
+    public Map<String, Object> playerObservedStateValues() {
+        return player == null ? Collections.emptyMap() : player.observedStateValues();
+    }
+
+    public CommandResult validateV2ManifestHint(String manifestId) {
+        TabletManifest manifest = activeManifest();
+        if (manifest == null) {
+            return CommandResult.failed("MANIFEST_UNAVAILABLE", "No active tablet manifest is available");
+        }
+        if (!matchesOptional(manifestId, manifest.tabletManifestId)) {
+            return CommandResult.rejected("MANIFEST_MISMATCH", "Command tablet manifest does not match active tablet manifest");
+        }
+        return CommandResult.completed("v2 manifest hint accepted");
     }
 
     public CommandResult prepareCue(int tabletSequence) {
@@ -87,6 +109,19 @@ public final class ManifestExecutor {
     public CommandResult showLive(String mediaKey) {
         String url = mediaResolver.resolveLiveUrl(activeManifest(), mediaKey);
         return player.showLive(url);
+    }
+
+    public CommandResult showLiveAsync(String mediaKey, MjpegLiveView.Listener listener) {
+        String url = mediaResolver.resolveLiveUrl(activeManifest(), mediaKey);
+        return player.showLiveAsync(url, listener);
+    }
+
+    public CommandResult showLiveUrl(String url) {
+        return player.showLive(url);
+    }
+
+    public CommandResult showLiveUrlAsync(String url, MjpegLiveView.Listener listener) {
+        return player.showLiveAsync(url, listener);
     }
 
     public CommandResult pauseMain() { return player.pauseMain(); }
