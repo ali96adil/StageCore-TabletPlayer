@@ -40,6 +40,7 @@ import okhttp3.WebSocketListener;
 public final class StageCoreDeviceConnection {
     private static final long SCOPE_ACK_RETRY_MS = 500L;
     private static final long LIVE_READY_TIMEOUT_MS = 10000L;
+    private static final long HEALTH_OBSERVATION_INTERVAL_MS = 10000L;
 
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -307,6 +308,9 @@ public final class StageCoreDeviceConnection {
                 lastStatus = "CONNECTED";
                 JSONObject hello = hello(settings, descriptor);
                 webSocket.send(hello.toString());
+                main.postDelayed(
+                        () -> healthObservationTick(webSocket),
+                        HEALTH_OBSERVATION_INTERVAL_MS);
                 synchronized (openedLock) {
                     opened[0] = true;
                     openedLock.notifyAll();
@@ -380,7 +384,7 @@ public final class StageCoreDeviceConnection {
             json.put("protocol_version", StageCoreClient.PROTOCOL);
             json.put("capabilities", new JSONArray(descriptor.baselineCapabilities()));
             json.put("readiness", "BLOCKER");
-            json.put("observed_state", StageCoreRuntimeBridge.inventoryObservedState());
+            json.put("observed_state", observedStateWithHealth(false));
             json.put("network_state", new JSONObject().put("transport", "WSS"));
         } catch (Exception ignored) {}
         return json;
@@ -544,7 +548,7 @@ public final class StageCoreDeviceConnection {
                     .put("assignment_epoch", epoch)
                     .put("connection_generation", generation)
                     .put("readiness", "READY")
-                    .put("observed_state", StageCoreRuntimeBridge.assignedObservedState(projectId, snapshotId))
+                    .put("observed_state", observedStateWithHealth(true))
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(ack.toString());
             lastStatus = "V2_SCOPE_ACK_SENT";
@@ -858,6 +862,25 @@ public final class StageCoreDeviceConnection {
         return status != CommandStatus.ACCEPTED && status != CommandStatus.COMPLETED;
     }
 
+    private void healthObservationTick(WebSocket webSocket) {
+        if (stopped || socket != webSocket) return;
+        sendObservation(webSocket);
+        main.postDelayed(
+                () -> healthObservationTick(webSocket),
+                HEALTH_OBSERVATION_INTERVAL_MS);
+    }
+
+    private JSONObject observedStateWithHealth(boolean ready) {
+        JSONObject observed = ready
+                ? StageCoreRuntimeBridge.assignedObservedState(
+                        assignedProjectId, assignedRuntimeSnapshotId)
+                : StageCoreRuntimeBridge.inventoryObservedState();
+        try {
+            observed.put("health", TabletHealthObservation.capture(context));
+        } catch (Exception ignored) {}
+        return observed;
+    }
+
     private void sendObservation(WebSocket webSocket) {
         String deviceId = deviceIdForSocket(webSocket);
         if (deviceId.isEmpty()) return;
@@ -868,10 +891,7 @@ public final class StageCoreDeviceConnection {
                     .put("schema_version", 2)
                     .put("device_id", deviceId)
                     .put("readiness", ready ? "READY" : "BLOCKER")
-                    .put("observed_state", ready
-                            ? StageCoreRuntimeBridge.assignedObservedState(
-                                    assignedProjectId, assignedRuntimeSnapshotId)
-                            : StageCoreRuntimeBridge.inventoryObservedState())
+                    .put("observed_state", observedStateWithHealth(ready))
                     .put("network_state", new JSONObject().put("transport", "WSS"));
             webSocket.send(json.toString());
         } catch (Exception ignored) {}
