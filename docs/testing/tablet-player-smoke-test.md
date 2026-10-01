@@ -144,3 +144,16 @@ Useful commands:
 - Bonjour discovery fills server host/port when a matching StageCore service is found.
 - The app advertises StageCore-controllable settings and media-scan capabilities.
 - Legacy OSC remains a rehearsal/debug path, not the final StageCore authority path.
+
+
+## First-show debug signing contract
+
+The CI-built `com.stagecore.player.mjpegtrial` APK uses the repository's public, debug-only StageCore Tablet signing identity. The Android workflow materializes that key explicitly and verifies the APK certificate before uploading the artifact.
+
+Expected SHA-256 certificate digest:
+
+```text
+7890a66e03e4a75f241fa9b767ead56f459a588e2e5a78f8f8f05f2a3aa3070d
+```
+
+This key is not a production signing credential and grants no StageCore device trust. Its purpose is only to keep first-show debug APK updates install-compatible across CI runners. Pairing, Hub trust, and `stagecore.device/2` authentication remain independent.

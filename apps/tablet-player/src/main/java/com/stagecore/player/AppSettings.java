@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.Locale;
-import java.util.UUID;
 
 public final class AppSettings {
     private static final String PREFS = "stagecore-player";
@@ -21,9 +20,13 @@ public final class AppSettings {
     public String deviceName;
     public String serverHost;
     public int serverPort;
+    public String trustedHubId;
+    public String trustedHubFingerprint;
+    public String trustedHubTlsSha256;
     public boolean autoDiscover;
     public int brightnessPercent;
     public String videoScaleMode;
+    public int liveRotationDegrees;
     public String orientationMode;
     public boolean showModeOnLaunch;
     public boolean showLockEnabled;
@@ -37,13 +40,19 @@ public final class AppSettings {
     public static AppSettings load(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         AppSettings settings = new AppSettings();
-        settings.deviceId = nonBlank(prefs.getString("device_id", null), "tablet-" + UUID.randomUUID());
-        settings.deviceName = nonBlank(prefs.getString("device_name", null), "Tablet " + suffix(settings.deviceId));
+        settings.deviceId = loadStableDeviceId(prefs);
+        settings.deviceName = nonBlank(
+                prefs.getString("device_name", null),
+                "Tablet " + suffix(settings.deviceId));
         settings.serverHost = prefs.getString("server_host", "");
         settings.serverPort = clamp(prefs.getInt("server_port", 8080), 1, 65535);
+        settings.trustedHubId = prefs.getString("trusted_hub_id", "");
+        settings.trustedHubFingerprint = prefs.getString("trusted_hub_fingerprint", "");
+        settings.trustedHubTlsSha256 = prefs.getString("trusted_hub_tls_sha256", "");
         settings.autoDiscover = prefs.getBoolean("auto_discover", true);
         settings.brightnessPercent = clamp(prefs.getInt("brightness_percent", 100), 5, 100);
         settings.videoScaleMode = normalizeScale(prefs.getString("video_scale_mode", SCALE_FIT));
+        settings.liveRotationDegrees = normalizeLiveRotation(prefs.getInt("live_rotation_degrees", 0));
         settings.orientationMode = normalizeOrientation(prefs.getString("orientation_mode", ORIENTATION_AUTO));
         settings.showModeOnLaunch = prefs.getBoolean("show_mode_on_launch", true);
         settings.showLockEnabled = prefs.getBoolean("show_lock_enabled", true);
@@ -51,17 +60,40 @@ public final class AppSettings {
         settings.heartbeatEnabled = prefs.getBoolean("heartbeat_enabled", true);
         settings.heartbeatPort = clamp(prefs.getInt("heartbeat_port", 9100), 1, 65535);
         settings.heartbeatIntervalSeconds = clamp(prefs.getInt("heartbeat_interval_seconds", 10), 3, 60);
-        settings.save(context);
         return settings;
     }
 
+    private static String loadStableDeviceId(SharedPreferences prefs) {
+        synchronized (AppSettings.class) {
+            String stored = prefs.getString("device_id", null);
+            if (stored != null && !stored.trim().isEmpty()) {
+                String normalized = StageCoreDeviceId.normalizeGenerated(stored);
+                if (!normalized.equals(stored.trim())) {
+                    prefs.edit().putString("device_id", normalized).apply();
+                }
+                return normalized;
+            }
+            String generated = StageCoreDeviceId.generate();
+            // SharedPreferences.apply() updates the in-memory map synchronously.
+            // The lock ensures another process-local loader cannot generate a
+            // different identity before that update becomes visible.
+            prefs.edit().putString("device_id", generated).apply();
+            return generated;
+        }
+    }
+
     public void save(Context context) {
-        deviceId = nonBlank(deviceId, "tablet-" + UUID.randomUUID());
+        deviceId = StageCoreDeviceId.normalizeGenerated(
+                nonBlank(deviceId, StageCoreDeviceId.generate()));
         deviceName = nonBlank(deviceName, "Tablet " + suffix(deviceId));
         serverHost = serverHost == null ? "" : serverHost.trim();
         serverPort = clamp(serverPort, 1, 65535);
+        trustedHubId = trustedHubId == null ? "" : trustedHubId.trim().toLowerCase(Locale.US);
+        trustedHubFingerprint = trustedHubFingerprint == null ? "" : trustedHubFingerprint.trim();
+        trustedHubTlsSha256 = trustedHubTlsSha256 == null ? "" : trustedHubTlsSha256.trim().toLowerCase(Locale.US);
         brightnessPercent = clamp(brightnessPercent, 5, 100);
         videoScaleMode = normalizeScale(videoScaleMode);
+        liveRotationDegrees = normalizeLiveRotation(liveRotationDegrees);
         orientationMode = normalizeOrientation(orientationMode);
         heartbeatPort = clamp(heartbeatPort, 1, 65535);
         heartbeatIntervalSeconds = clamp(heartbeatIntervalSeconds, 3, 60);
@@ -71,9 +103,13 @@ public final class AppSettings {
                 .putString("device_name", deviceName)
                 .putString("server_host", serverHost)
                 .putInt("server_port", serverPort)
+                .putString("trusted_hub_id", trustedHubId)
+                .putString("trusted_hub_fingerprint", trustedHubFingerprint)
+                .putString("trusted_hub_tls_sha256", trustedHubTlsSha256)
                 .putBoolean("auto_discover", autoDiscover)
                 .putInt("brightness_percent", brightnessPercent)
                 .putString("video_scale_mode", videoScaleMode)
+                .putInt("live_rotation_degrees", liveRotationDegrees)
                 .putString("orientation_mode", orientationMode)
                 .putBoolean("show_mode_on_launch", showModeOnLaunch)
                 .putBoolean("show_lock_enabled", showLockEnabled)
@@ -82,6 +118,87 @@ public final class AppSettings {
                 .putInt("heartbeat_port", heartbeatPort)
                 .putInt("heartbeat_interval_seconds", heartbeatIntervalSeconds)
                 .apply();
+    }
+
+    public boolean hasTrustedHub() {
+        try {
+            trustedHubCandidate();
+            return true;
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
+    }
+
+    public boolean matchesTrustedHub(StageCoreHubCandidate candidate) {
+        return candidate != null && hasTrustedHub()
+                && candidate.matchesBinding(
+                        trustedHubId,
+                        trustedHubFingerprint,
+                        trustedHubTlsSha256);
+    }
+
+    public StageCoreHubCandidate trustedHubCandidate() {
+        return StageCoreHubCandidate.remembered(
+                trustedHubId,
+                trustedHubFingerprint,
+                trustedHubTlsSha256,
+                serverHost,
+                serverPort);
+    }
+
+    public void trustHub(StageCoreHubCandidate candidate) {
+        if (candidate == null) throw new IllegalArgumentException("Hub candidate is required");
+        serverHost = candidate.resolvedHost;
+        serverPort = candidate.port;
+        trustedHubId = candidate.hubId;
+        trustedHubFingerprint = candidate.fingerprint;
+        trustedHubTlsSha256 = candidate.tlsCertificateSha256;
+    }
+
+    public static boolean updateTrustedHubEndpointIfUnchanged(
+            Context context,
+            String expectedHubId,
+            String expectedFingerprint,
+            String expectedPin,
+            String expectedHost,
+            int expectedPort,
+            String newHost,
+            int newPort) {
+        if (context == null || newHost == null || newHost.trim().isEmpty()
+                || newPort < 1 || newPort > 65535) {
+            return false;
+        }
+        synchronized (AppSettings.class) {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            String hubId = normalize(prefs.getString("trusted_hub_id", ""));
+            String fingerprint = prefs.getString("trusted_hub_fingerprint", "");
+            String pin = normalize(prefs.getString("trusted_hub_tls_sha256", ""));
+            String host = prefs.getString("server_host", "");
+            int port = clamp(prefs.getInt("server_port", 8080), 1, 65535);
+
+            if (!hubId.equals(normalize(expectedHubId))
+                    || !fingerprint.equals(expectedFingerprint == null ? "" : expectedFingerprint.trim())
+                    || !pin.equals(normalize(expectedPin))
+                    || !host.equals(expectedHost == null ? "" : expectedHost.trim())
+                    || port != expectedPort) {
+                return false;
+            }
+            prefs.edit()
+                    .putString("server_host", newHost.trim())
+                    .putInt("server_port", newPort)
+                    .apply();
+            return true;
+        }
+    }
+
+    public void clearTrustedHub() {
+        trustedHubId = "";
+        trustedHubFingerprint = "";
+        trustedHubTlsSha256 = "";
+    }
+
+    public String hubTrustLabel() {
+        return hasTrustedHub() ? "موثوق" : "بانتظار اعتماد Hub";
     }
 
     public String serverLabel() {
@@ -93,6 +210,10 @@ public final class AppSettings {
         if (!heartbeatEnabled) return "متوقف";
         if (serverHost == null || serverHost.trim().isEmpty()) return "بانتظار السيرفر";
         return serverHost + ":" + heartbeatPort + " كل " + heartbeatIntervalSeconds + " ثواني";
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.US);
     }
 
     private static String nonBlank(String value, String fallback) {
@@ -112,6 +233,10 @@ public final class AppSettings {
     private static String normalizeScale(String value) {
         if (SCALE_FULL.equals(value) || SCALE_FIT.equals(value) || SCALE_CROP.equals(value)) return value;
         return SCALE_FIT;
+    }
+
+    public static int normalizeLiveRotation(int degrees) {
+        return degrees == 90 || degrees == 180 || degrees == 270 ? degrees : 0;
     }
 
     private static String normalizeOrientation(String value) {

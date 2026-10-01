@@ -17,9 +17,12 @@ import android.widget.TextView;
 import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.TabletAction;
 
+
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public final class TabletPlayer {
     private final Context context;
@@ -28,6 +31,8 @@ public final class TabletPlayer {
     private TextureSlot mainVideo;
     private TextureSlot overlayVideo;
     private TextureSlot liveVideo;
+    private MjpegLiveView mjpegLive;
+    private MjpegLiveView.Listener liveStatusListener;
     private View blackoutView;
     private TextView statusView;
     private File preparedMainFile;
@@ -39,6 +44,7 @@ public final class TabletPlayer {
     private boolean blackoutVisible = false;
     private boolean statusPinned = false;
     private String videoScaleMode = AppSettings.SCALE_FIT;
+    private int liveRotationDegrees;
 
     public TabletPlayer(Context context) {
         this.context = context;
@@ -50,11 +56,13 @@ public final class TabletPlayer {
         mainVideo = new TextureSlot("main");
         overlayVideo = new TextureSlot("overlay");
         liveVideo = new TextureSlot("live");
+        mjpegLive = new MjpegLiveView(context);
         blackoutView = new View(context);
         statusView = new TextView(context);
 
         overlayVideo.view.setVisibility(View.GONE);
         liveVideo.view.setVisibility(View.GONE);
+        mjpegLive.setVisibility(View.GONE);
 
         blackoutView.setBackgroundColor(Color.BLACK);
         blackoutView.setVisibility(View.GONE);
@@ -68,6 +76,7 @@ public final class TabletPlayer {
         stage.addView(mainVideo.view, fillParams());
         stage.addView(overlayVideo.view, fillParams());
         stage.addView(liveVideo.view, fillParams());
+        stage.addView(mjpegLive, fillParams());
         stage.addView(blackoutView, fillParams());
 
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
@@ -85,6 +94,12 @@ public final class TabletPlayer {
             videoScaleMode = AppSettings.SCALE_FIT;
         }
         applyKnownLayouts();
+        if (mjpegLive != null) mjpegLive.applyScale(videoScaleMode);
+    }
+
+    public void setLiveRotation(int degrees) {
+        liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        if (mjpegLive != null) mjpegLive.applyRotation(liveRotationDegrees);
     }
 
     public String videoScaleMode() {
@@ -196,18 +211,82 @@ public final class TabletPlayer {
         return CommandResult.completed("Overlay hide requested");
     }
 
+    public void setLiveStatusListener(MjpegLiveView.Listener listener) {
+        liveStatusListener = listener;
+    }
+
     public CommandResult showLive(String url) {
-        if (url == null || url.trim().isEmpty()) return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
+        return startLive(url, null, false);
+    }
+
+    CommandResult showLiveAsync(String url, MjpegLiveView.Listener commandListener) {
+        return startLive(url, commandListener, true);
+    }
+
+    private CommandResult startLive(String url, MjpegLiveView.Listener commandListener, boolean asynchronous) {
+        if (url == null || url.trim().isEmpty()) {
+            return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
+        }
+        String source = url.trim();
         hideBlackout();
         hideOverlay(0);
-        liveVideo.view.setAlpha(1f);
-        liveVideo.view.setVisibility(View.VISIBLE);
-        liveVideo.view.bringToFront();
-        keepControlsOnTop();
-        currentLive = url;
-        liveVideo.prepare(Uri.parse(url), false, true, 0, null);
-        showStatus("Live: " + url);
-        return CommandResult.completed("Live visible");
+        currentLive = source;
+        if (isMjpegSource(source)) {
+            liveVideo.stopAndReset();
+            liveVideo.view.setVisibility(View.GONE);
+            mjpegLive.applyScale(videoScaleMode);
+            mjpegLive.applyRotation(liveRotationDegrees);
+            mjpegLive.setAlpha(1f);
+            mjpegLive.setVisibility(View.VISIBLE);
+            mjpegLive.bringToFront();
+            keepControlsOnTop();
+            mjpegLive.play(source, new MjpegLiveView.Listener() {
+                @Override public void onReady() {
+                    showStatus("MJPEG live ready");
+                    notifyLiveReady(commandListener);
+                }
+                @Override public void onError(String reason) {
+                    showStatus("MJPEG live: " + reason);
+                    notifyLiveError(commandListener, reason);
+                }
+            });
+        } else {
+            mjpegLive.stop();
+            mjpegLive.setVisibility(View.GONE);
+            liveVideo.view.setAlpha(1f);
+            liveVideo.view.setVisibility(View.VISIBLE);
+            liveVideo.view.bringToFront();
+            keepControlsOnTop();
+            liveVideo.prepare(Uri.parse(source), false, true, 0, () -> {
+                showStatus("Media live ready");
+                notifyLiveReady(commandListener);
+            });
+        }
+        showStatus("Live connecting: " + source);
+        return asynchronous
+                ? CommandResult.accepted("Live connecting; waiting for first frame")
+                : CommandResult.completed("Live connecting; waiting for first frame");
+    }
+
+    private void notifyLiveReady(MjpegLiveView.Listener commandListener) {
+        if (liveStatusListener != null) liveStatusListener.onReady();
+        if (commandListener != null && commandListener != liveStatusListener) {
+            commandListener.onReady();
+        }
+    }
+
+    private void notifyLiveError(MjpegLiveView.Listener commandListener, String reason) {
+        if (liveStatusListener != null) liveStatusListener.onError(reason);
+        if (commandListener != null && commandListener != liveStatusListener) {
+            commandListener.onError(reason);
+        }
+    }
+
+    private boolean isMjpegSource(String url) {
+        String lower = url.toLowerCase(Locale.US);
+        return (lower.startsWith("http://") || lower.startsWith("https://"))
+                && (lower.contains("/api/v0/stream") || lower.endsWith(".mjpeg")
+                || lower.endsWith(".mjpg"));
     }
 
     public CommandResult hideLive() {
@@ -215,9 +294,18 @@ public final class TabletPlayer {
             liveVideo.stopAndReset();
             liveVideo.view.setVisibility(View.GONE);
         }
+        if (mjpegLive != null) {
+            mjpegLive.stop();
+            mjpegLive.setVisibility(View.GONE);
+        }
         currentLive = "none";
         showStatus("Live hidden");
         return CommandResult.completed("Live hidden");
+    }
+
+    public void release() {
+        hideLive();
+        if (mjpegLive != null) mjpegLive.release();
     }
 
     public CommandResult blackout() {
@@ -267,7 +355,25 @@ public final class TabletPlayer {
                 + " overlay=" + currentOverlay
                 + " live=" + currentLive
                 + " blackout=" + blackoutVisible
-                + " scale=" + videoScaleMode;
+                + " scale=" + videoScaleMode
+                + " live_rotation=" + liveRotationDegrees;
+    }
+
+    /**
+     * Typed, current player state for authenticated StageCore observation.
+     * This is observational only: it does not grant command/replay authority.
+     */
+    public Map<String, Object> observedStateValues() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("main_media", currentMain);
+        values.put("prepared_main_media", preparedMain);
+        values.put("main_playing", mainPlaying);
+        values.put("overlay_media", currentOverlay);
+        values.put("live_source", currentLive);
+        values.put("blackout", blackoutVisible);
+        values.put("video_scale_mode", videoScaleMode);
+        values.put("live_rotation_degrees", liveRotationDegrees);
+        return values;
     }
 
     private void handleMainCompletion(String endBehavior) {
@@ -312,6 +418,7 @@ public final class TabletPlayer {
             if (child != mainVideo.view
                     && child != overlayVideo.view
                     && child != liveVideo.view
+                    && child != mjpegLive
                     && child != blackoutView) {
                 operatorOverlays.add(child);
             }
@@ -533,6 +640,7 @@ public final class TabletPlayer {
         if ("live".equals(name)) {
             currentLive = "none";
             liveVideo.view.setVisibility(View.GONE);
+            if (liveStatusListener != null) liveStatusListener.onError("MediaPlayer " + what + "/" + extra);
         }
         showStatus(name + " error: " + what + "/" + extra);
         android.util.Log.e("StageCorePlayer", name + " error what=" + what + " extra=" + extra);
@@ -541,7 +649,10 @@ public final class TabletPlayer {
     private void handleSlotException(String name, Exception error) {
         if ("main".equals(name)) mainPlaying = false;
         if ("overlay".equals(name)) currentOverlay = "none";
-        if ("live".equals(name)) currentLive = "none";
+        if ("live".equals(name)) {
+            currentLive = "none";
+            if (liveStatusListener != null) liveStatusListener.onError(error.getClass().getSimpleName());
+        }
         showStatus(name + " exception: " + error.getClass().getSimpleName());
         android.util.Log.e("StageCorePlayer", name + " exception", error);
     }

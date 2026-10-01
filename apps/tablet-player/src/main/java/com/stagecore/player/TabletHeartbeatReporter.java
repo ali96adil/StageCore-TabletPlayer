@@ -30,6 +30,9 @@ public final class TabletHeartbeatReporter {
         AppSettings settings();
         TabletManifest manifest();
         String manifestSource();
+        String stageCoreProjectId();
+        String stageCoreRuntimeSnapshotId();
+        String stageCoreAssignmentState();
         String mediaScanSummary();
         String storagePermissionState();
         String playerState();
@@ -100,9 +103,12 @@ public final class TabletHeartbeatReporter {
                 + json("show_mode_on_launch", String.valueOf(settings.showModeOnLaunch), false) + ","
                 + json("show_lock_enabled", String.valueOf(settings.showLockEnabled), false) + ","
                 + json("manifest_source", safeSnapshot("manifest_source", provider::manifestSource)) + ","
-                + json("project_id", manifest == null ? "unknown" : manifest.stageCoreProjectId) + ","
-                + json("runtime_snapshot_id", manifest == null ? "unknown" : manifest.runtimeSnapshotId) + ","
+                + json("assignment_state", safeSnapshot("assignment_state", provider::stageCoreAssignmentState)) + ","
+                + json("project_id", nonBlankOrUnknown(safeSnapshot("project_id", provider::stageCoreProjectId))) + ","
+                + json("runtime_snapshot_id", nonBlankOrUnknown(safeSnapshot("runtime_snapshot_id", provider::stageCoreRuntimeSnapshotId))) + ","
                 + json("tablet_manifest_id", manifest == null ? "unknown" : manifest.tabletManifestId) + ","
+                + json("local_manifest_project_id", manifest == null ? "unknown" : manifest.stageCoreProjectId) + ","
+                + json("local_manifest_runtime_snapshot_id", manifest == null ? "unknown" : manifest.runtimeSnapshotId) + ","
                 + json("permission_state", storagePermissionState()) + ","
                 + json("media_scan", safeSnapshot("media_scan", provider::mediaScanSummary)) + ","
                 + json("player_state", safeSnapshot("player_state", provider::playerState)) + ","
@@ -124,6 +130,7 @@ public final class TabletHeartbeatReporter {
             health.put("show_mode", "SHOW".equalsIgnoreCase(safeSnapshot("app_mode", provider::appMode)));
             health.put("show_mode_on_launch", settings != null && settings.showModeOnLaunch);
             health.put("show_lock_enabled", settings != null && settings.showLockEnabled);
+            health.put("keep_screen_awake", settings != null && settings.keepScreenAwake);
         } catch (Exception ignored) {}
         return health;
     }
@@ -160,6 +167,10 @@ public final class TabletHeartbeatReporter {
     private String storagePermissionState() {
         boolean allFiles = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
         return allFiles ? "مفعّل" : "غير مفعّل";
+    }
+
+    private static String nonBlankOrUnknown(String value) {
+        return value == null || value.trim().isEmpty() ? "unknown" : value.trim();
     }
 
     private String safeSnapshot(String field, SnapshotValue value) {

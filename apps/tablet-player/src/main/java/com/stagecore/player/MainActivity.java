@@ -7,6 +7,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Environment;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -34,6 +36,9 @@ import com.stagecore.player.model.TabletManifest;
 
 import org.json.JSONObject;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public final class MainActivity extends Activity implements StageCoreRuntimeBridge.SettingsExecutor {
     private TabletPlayer player;
     private ManifestStore manifestStore;
@@ -44,13 +49,18 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     private TabletHeartbeatReporter heartbeatReporter;
     private MediaResolver mediaResolver;
     private AppSettings appSettings;
+    private StageCoreHubCandidate pendingHubCandidate;
+    private boolean discoveryAmbiguous;
+    private final ExecutorService hubTrustWorker = Executors.newSingleThreadExecutor();
 
     private TextView statusHeader;
     private TextView actionResult;
     private TextView resultDetails;
     private TextView discoveryInfo;
     private TextView brightnessLabel;
+    private TextView liveRotationLabel;
     private TextView readinessBadge;
+    private TextView stageCoreRuntimeBadge;
     private View controlsPanel;
     private LinearLayout advancedDebugPanel;
     private CheckBox advancedDebugCheck;
@@ -71,6 +81,13 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     private String lastError = "";
     private String lastAction = "جاهز";
     private String lastActionState = "READY ✅";
+    private final Handler stageCoreStatusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable stageCoreStatusRefresh = new Runnable() {
+        @Override public void run() {
+            refreshStageCoreConnectionStatus();
+            stageCoreStatusHandler.postDelayed(this, 1000L);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +101,17 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         applyScreenBrightness(appSettings.brightnessPercent);
 
         player = new TabletPlayer(this);
+        player.setLiveStatusListener(new MjpegLiveView.Listener() {
+            @Override public void onReady() {
+                showActionResult("Test Live URL", "First live frame rendered.", "READY ✅", true);
+                pokeHeartbeat();
+            }
+            @Override public void onError(String reason) {
+                lastError = "Live: " + reason;
+                showActionResult("Test Live URL", "Live error: " + reason + "\nRetrying while Live is active.", "FAILED ❌", true);
+                pokeHeartbeat();
+            }
+        });
         manifestStore = new ManifestStore();
         mediaResolver = new MediaResolver();
         mediaResolver.ensureBaseDir();
@@ -91,9 +119,23 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
         discovery = new StageCoreDiscovery(this);
         heartbeatReporter = new TabletHeartbeatReporter(this, new TabletHeartbeatReporter.SnapshotProvider() {
-            @Override public AppSettings settings() { return appSettings; }
+            @Override public AppSettings settings() { return AppSettings.load(MainActivity.this); }
             @Override public TabletManifest manifest() { return manifestStore.activeManifest(); }
             @Override public String manifestSource() { return manifestStore.activeSource(); }
+            @Override public String stageCoreProjectId() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection != null && connection.runtimeReady()
+                        ? connection.assignedProjectId() : "";
+            }
+            @Override public String stageCoreRuntimeSnapshotId() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection != null && connection.runtimeReady()
+                        ? connection.assignedRuntimeSnapshotId() : "";
+            }
+            @Override public String stageCoreAssignmentState() {
+                StageCoreDeviceConnection connection = officialDeviceConnection();
+                return connection == null ? "UNAVAILABLE" : connection.assignmentState();
+            }
             @Override public String mediaScanSummary() { return mediaResolver.scanSummary(manifestStore.activeManifest()).replace('\n', ';'); }
             @Override public String storagePermissionState() { return MainActivity.this.storagePermissionState(); }
             @Override public String playerState() { return player.observationSummary(); }
@@ -106,15 +148,16 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         root.setBackgroundColor(Color.BLACK);
         player.attachTo(root);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         addControls(root);
         addHotCorner(root);
         setContentView(root);
 
         loadExternalOrSample();
-        oscServer = new LegacyOscServer(executor, player);
+        oscServer = new LegacyOscServer(executor, player, this::legacyOscBlocked);
         oscServer.start(9000);
         refreshSettingsFields();
-        showActionResult("Startup", "جاهز للعرض. OSC debug يعمل على UDP 9000.", "READY ✅", false);
+        showActionResult("Startup", "جاهز للعرض.", "READY ✅", false);
         setControlsVisible(!appSettings.showModeOnLaunch);
         if (appSettings.autoDiscover) startDiscovery(false);
         heartbeatReporter.start();
@@ -127,6 +170,14 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         applyAwakeFlag();
         applyShowLockSurface();
         if (heartbeatReporter != null) heartbeatReporter.pokeSoon();
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
+        stageCoreStatusHandler.post(stageCoreStatusRefresh);
+    }
+
+    @Override
+    protected void onPause() {
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
+        super.onPause();
     }
 
     @Override
@@ -160,9 +211,12 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     @Override
     protected void onDestroy() {
         StageCoreRuntimeBridge.unregisterSettings(this);
+        stageCoreStatusHandler.removeCallbacks(stageCoreStatusRefresh);
         if (heartbeatReporter != null) heartbeatReporter.stop();
+        if (player != null) player.release();
         if (oscServer != null) oscServer.stop();
         if (discovery != null) discovery.stop();
+        hubTrustWorker.shutdownNow();
         super.onDestroy();
     }
 
@@ -174,10 +228,12 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         panel.setTextDirection(View.TEXT_DIRECTION_RTL);
 
-        panel.addView(title("StageCore Player V1"));
+        panel.addView(title("StageCore Player"));
         panel.addView(help("تابلت عرض احترافي: التشغيل والكيوات من StageCore، وهذا المكان فقط للإعداد والفحص السريع."));
         readinessBadge = badge("جاهزية العرض: جاري الفحص...");
         panel.addView(readinessBadge);
+        stageCoreRuntimeBadge = badge("StageCore runtime: جاري الاتصال...");
+        panel.addView(stageCoreRuntimeBadge);
 
         statusHeader = badge("جاهز");
         statusHeader.setBackgroundColor(0x55222222);
@@ -189,31 +245,60 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
         panel.addView(section("فحص العرض"));
         panel.addView(rowButtons(
-                button("Pre-show Check", v -> showActionResult("Pre-show Check", preShowCheckSummary(), preShowCheckSummary().contains("READY") ? "READY ✅" : "CHECK ⚠️", true)),
+                button("Pre-show Check", v -> {
+                    String summary = preShowCheckSummary();
+                    boolean ready = summary.startsWith("فحص قبل العرض: READY ✅");
+                    showActionResult(
+                            "Pre-show Check",
+                            summary,
+                            ready ? "READY ✅" : "CHECK ⚠️",
+                            true);
+                }),
                 button("Reload + Scan", v -> reloadManifestAndScan()),
-                button("Cue Preview", v -> showActionResult("Cue Preview", cuePreviewSummary(), "READY ✅", true))
+                button("Cue Preview", v -> {
+                    String preview = cuePreviewSummary();
+                    String upper = preview.toUpperCase(java.util.Locale.US);
+                    boolean valid = !preview.contains("لا يوجد manifest")
+                            && !upper.contains("MISSING KEY")
+                            && !preview.contains(" = empty");
+                    showActionResult(
+                            "Cue Preview",
+                            preview,
+                            valid ? "READY ✅" : "CHECK ⚠️",
+                            true);
+                })
         ));
         panel.addView(rowButtons(
-                button("Identify", v -> showResult("Identify", player.identify())),
+                button("Identify", v -> runLocalPlaybackAction("Identify", () -> player.identify())),
                 button("دخول وضع العرض", v -> enterShowModeNow()),
                 button("إغلاق التطبيق", v -> finish())
         ));
 
         panel.addView(section("تحكم سريع آمن"));
         panel.addView(rowButtons(
-                button("Clear Overlay", v -> showResult("Clear Overlay", player.hideOverlay(0))),
-                button("Hide Live", v -> showResult("Hide Live", player.hideLive())),
-                button("Clear Blackout", v -> showResult("Clear Blackout", player.clearBlackout()))
+                button("Clear Overlay", v -> runLocalPlaybackAction("Clear Overlay", () -> player.hideOverlay(0))),
+                button("Hide Live", v -> runLocalPlaybackAction("Hide Live", () -> player.hideLive())),
+                button("Clear Blackout", v -> runLocalPlaybackAction("Clear Blackout", () -> player.clearBlackout()))
         ));
-        panel.addView(help("هذه الأزرار لا تغيّر Cue List. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
+        panel.addView(help("هذه الأزرار للبروفة/الأوفلاين فقط، وتتوقف عن تغيير العرض عندما يكون StageCore runtime بحالة READY. إنشاء الكيوات، loop/end، وتبديل أدوار التابلتات تكون من StageCore."));
 
         panel.addView(section("اختبار Live يدوي"));
+        liveRotationLabel = help("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        panel.addView(liveRotationLabel);
+        panel.addView(rowButtons(
+                button("0°", v -> setLiveRotation(0)),
+                button("90°", v -> setLiveRotation(90)),
+                button("180°", v -> setLiveRotation(180)),
+                button("270°", v -> setLiveRotation(270))
+        ));
+        panel.addView(help("لف الكاميرا عمودياً ثم اختر 90° أو 270° حسب اتجاهها. Fit يعرض الصورة كاملة؛ Crop يقص الحواف."));
         liveUrlInput = editText();
-        liveUrlInput.setText("http://192.168.3.80:81/stream");
+        liveUrlInput.setHint("http://<relay-ip>:9081/api/v0/stream");
+        liveUrlInput.setText("");
         panel.addView(field("Live URL", liveUrlInput));
         panel.addView(rowButtons(
                 button("Test Live URL", v -> testLiveUrl()),
-                button("Hide Live", v -> showResult("Hide Live", player.hideLive()))
+                button("Hide Live", v -> runLocalPlaybackAction("Hide Live", () -> player.hideLive()))
         ));
 
         panel.addView(section("الصورة والسطوع"));
@@ -269,10 +354,11 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         panel.addView(field("البورت", serverPortInput));
         autoDiscoverCheck = checkBox("اكتشاف تلقائي Bonjour", true);
         panel.addView(autoDiscoverCheck);
-        discoveryInfo = help("الاكتشاف يبحث عن _stagecore._tcp و _stagecore-hub._tcp داخل نفس الشبكة.");
+        discoveryInfo = help("الاكتشاف الرسمي يستخدم _stagecore-hub._tcp فقط. أول Hub يحتاج اعتماد صريح بعد تحقق TLS والهوية.");
         panel.addView(discoveryInfo);
         panel.addView(rowButtons(
-                button("بحث تلقائي", v -> startDiscovery(true)),
+                button("بحث آمن", v -> startDiscovery(true)),
+                button("اعتماد Hub المكتشف", v -> trustDiscoveredHub()),
                 button("إيقاف البحث", v -> stopDiscovery())
         ));
 
@@ -321,23 +407,23 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         advancedDebugPanel.setOrientation(LinearLayout.VERTICAL);
         advancedDebugPanel.setVisibility(View.GONE);
         advancedDebugCheck.setOnCheckedChangeListener((buttonView, isChecked) -> advancedDebugPanel.setVisibility(isChecked ? View.VISIBLE : View.GONE));
-        advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore."));
+        advancedDebugPanel.addView(help("هذا القسم للتشخيص والبروفات فقط. التحكم الإنتاجي يكون من StageCore. Legacy OSC debug listener: UDP 9000."));
         advancedDebugPanel.addView(rowButtons(
-                button("Prepare 1", v -> showResult("Prepare 1", executor.prepareCue(1))),
-                button("GO 1", v -> showResult("GO 1", executor.goCue(1))),
-                button("Overlay 2", v -> showResult("Overlay 2", executor.goCue(2)))
+                button("Prepare 1", v -> runLocalPlaybackAction("Prepare 1", () -> executor.prepareCue(1))),
+                button("GO 1", v -> runLocalPlaybackAction("GO 1", () -> executor.goCue(1))),
+                button("Overlay 2", v -> runLocalPlaybackAction("Overlay 2", () -> executor.goCue(2)))
         ));
         advancedDebugPanel.addView(rowButtons(
-                button("Sample Live Cue 3", v -> showResult("Sample Live Cue 3", executor.goCue(3))),
-                button("Blackout 4", v -> showResult("Blackout 4", executor.goCue(4))),
-                button("Clear", v -> showResult("Clear", player.clearBlackout()))
+                button("Sample Live Cue 3", v -> runLocalPlaybackAction("Sample Live Cue 3", () -> executor.goCue(3))),
+                button("Blackout 4", v -> runLocalPlaybackAction("Blackout 4", () -> executor.goCue(4))),
+                button("Clear", v -> runLocalPlaybackAction("Clear", () -> player.clearBlackout()))
         ));
         cueNumberInput = editText();
         cueNumberInput.setText("1");
         advancedDebugPanel.addView(field("رقم Cue للاختبار اليدوي", cueNumberInput));
         advancedDebugPanel.addView(rowButtons(
-                button("Prepare Cue", v -> showResult("Prepare Cue " + selectedCueNumber(), executor.prepareCue(selectedCueNumber()))),
-                button("GO Cue", v -> showResult("GO Cue " + selectedCueNumber(), executor.goCue(selectedCueNumber())))
+                button("Prepare Cue", v -> runLocalPlaybackAction("Prepare Cue " + selectedCueNumber(), () -> executor.prepareCue(selectedCueNumber()))),
+                button("GO Cue", v -> runLocalPlaybackAction("GO Cue " + selectedCueNumber(), () -> executor.goCue(selectedCueNumber())))
         ));
         panel.addView(advancedDebugPanel);
 
@@ -465,15 +551,30 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         if (keepAwakeCheck != null) keepAwakeCheck.setChecked(appSettings.keepScreenAwake);
         if (heartbeatCheck != null) heartbeatCheck.setChecked(appSettings.heartbeatEnabled);
         if (brightnessLabel != null) brightnessLabel.setText("السطوع: " + appSettings.brightnessPercent + "%");
+        if (liveRotationLabel != null) liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        refreshStageCoreConnectionStatus();
         updateReadinessBadge();
         updateStatusHeader();
     }
 
     private void saveSettingsFromFields() {
+        String previousDeviceId = appSettings.deviceId;
+        String previousDeviceName = appSettings.deviceName;
+        String previousServerHost = appSettings.serverHost;
+        int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, "");
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
+        boolean endpointChanged = !sameEndpoint(
+                previousServerHost, previousServerPort,
+                appSettings.serverHost, appSettings.serverPort);
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
+                || !previousDeviceName.equals(appSettings.deviceName);
+        if (endpointChanged) {
+            appSettings.clearTrustedHub();
+            pendingHubCandidate = null;
+        }
         appSettings.autoDiscover = autoDiscoverCheck != null && autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck != null && showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck != null && showLockCheck.isChecked();
@@ -481,10 +582,16 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         appSettings.heartbeatEnabled = heartbeatCheck != null && heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        if (endpointChanged || identityChanged) {
+            requestDeviceReconnect(endpointChanged
+                    ? "StageCore endpoint/trust changed"
+                    : "Tablet identity changed");
+        }
         applyAwakeFlag();
         applyScreenBrightness(appSettings.brightnessPercent);
         applyOrientation(appSettings.orientationMode);
         player.setVideoScaleMode(appSettings.videoScaleMode);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
         refreshSettingsFields();
         showActionResult("Save Settings", "تم حفظ الإعدادات.", "READY ✅", false);
         applyShowLockSurface();
@@ -492,11 +599,24 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     }
 
     private void regenerateDeviceId() {
-        appSettings.deviceId = "tablet-" + java.util.UUID.randomUUID();
+        appSettings.deviceId = StageCoreDeviceId.generate();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        requestDeviceReconnect("Tablet identity regenerated");
         refreshSettingsFields();
         showActionResult("Regenerate ID", "تم توليد ID جديد لهذا التابلت.", "READY ✅", true);
+        pokeHeartbeat();
+    }
+
+    private void setLiveRotation(int degrees) {
+        appSettings.liveRotationDegrees = AppSettings.normalizeLiveRotation(degrees);
+        appSettings.save(this);
+        player.setLiveRotation(appSettings.liveRotationDegrees);
+        if (liveRotationLabel != null) {
+            liveRotationLabel.setText("Live Rotation: " + appSettings.liveRotationDegrees + "°");
+        }
+        showActionResult("Live Rotation", "تم تدوير صورة Live إلى " + appSettings.liveRotationDegrees
+                + "° بدون تغيير فيديوهات MP4.", "READY ✅", false);
         pokeHeartbeat();
     }
 
@@ -518,19 +638,50 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
     private void startDiscovery(boolean visibleFeedback) {
         saveSettingsFromFieldsWithoutRender();
-        if (visibleFeedback && discoveryInfo != null) discoveryInfo.setText("جاري البحث عن StageCore داخل الشبكة...");
-        showActionResult("Discovery", "جاري البحث عن StageCore داخل الشبكة...", "Running...", false);
+        pendingHubCandidate = null;
+        discoveryAmbiguous = false;
+        if (visibleFeedback && discoveryInfo != null) {
+            discoveryInfo.setText("جاري البحث الآمن عن StageCore Hub داخل الشبكة...");
+        }
+        showActionResult("Discovery", "جاري البحث الآمن عن StageCore Hub داخل الشبكة...", "Running...", false);
         discovery.start(new StageCoreDiscovery.Callback() {
             @Override
-            public void onFound(String name, String host, int port, String serviceType) {
-                appSettings.serverHost = host;
-                appSettings.serverPort = port > 0 ? port : appSettings.serverPort;
-                appSettings.save(MainActivity.this);
-                refreshSettingsFields();
-                String message = "تم العثور على StageCore: " + name + " — " + appSettings.serverLabel() + " — " + serviceType;
+            public void onFound(StageCoreHubCandidate candidate) {
+                if (appSettings.hasTrustedHub()) {
+                    if (!appSettings.matchesTrustedHub(candidate)) {
+                        String message = "تم تجاهل Hub لا يطابق الهوية المحفوظة: " + candidate.displayName;
+                        if (discoveryInfo != null) discoveryInfo.setText(message);
+                        showActionResult("Discovery", message, "CHECK ⚠️", true);
+                        return;
+                    }
+                    verifyRememberedHubEndpoint(candidate);
+                    return;
+                }
+
+                if (discoveryAmbiguous) {
+                    String message = "يوجد أكثر من Hub مختلف في الاكتشاف. أوقف البحث وأعده بعد تحديد Hub واحد.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                    return;
+                }
+
+                if (pendingHubCandidate != null
+                        && (!pendingHubCandidate.hubId.equals(candidate.hubId)
+                        || !pendingHubCandidate.tlsCertificateSha256.equals(candidate.tlsCertificateSha256))) {
+                    pendingHubCandidate = null;
+                    discoveryAmbiguous = true;
+                    String message = "تم العثور على أكثر من Hub مختلف. لن يتم اعتماد أي واحد تلقائياً.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                    return;
+                }
+
+                pendingHubCandidate = candidate;
+                String message = "تم العثور على Hub غير معتمد: " + candidate.displayName
+                        + " — " + candidate.resolvedHost + ":" + candidate.port
+                        + "\nاضغط «اعتماد Hub المكتشف» لإجراء تحقق TLS والهوية ثم حفظ الثقة.";
                 if (discoveryInfo != null) discoveryInfo.setText(message);
-                showActionResult("Discovery", message, "READY ✅", true);
-                pokeHeartbeat();
+                showActionResult("Discovery", message, "CHECK ⚠️", true);
             }
 
             @Override
@@ -541,6 +692,94 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         });
     }
 
+    private void trustDiscoveredHub() {
+        StageCoreHubCandidate candidate = pendingHubCandidate;
+        if (discoveryAmbiguous) {
+            showActionResult(
+                    "Trust Hub",
+                    "الاكتشاف يحتوي أكثر من Hub مختلف. لن يتم اعتماد أي واحد حتى تعيد البحث بمرشح واحد.",
+                    "CHECK ⚠️",
+                    true);
+            return;
+        }
+        if (candidate == null) {
+            showActionResult(
+                    "Trust Hub",
+                    "لا يوجد Hub واحد صالح بانتظار الاعتماد. شغّل البحث الآمن أولاً.",
+                    "CHECK ⚠️",
+                    true);
+            return;
+        }
+        showActionResult("Trust Hub", "جاري التحقق من TLS وهوية StageCore Hub...", "Running...", false);
+        hubTrustWorker.execute(() -> {
+            try {
+                okhttp3.OkHttpClient transport = StageCoreHubTransport.makeClient(
+                        candidate.resolvedHost,
+                        candidate.tlsCertificateSha256);
+                StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
+                runOnUiThread(() -> {
+                    if (!sameHubCandidate(pendingHubCandidate, candidate) || discoveryAmbiguous) return;
+                    appSettings.trustHub(candidate);
+                    appSettings.save(MainActivity.this);
+                    pendingHubCandidate = null;
+                    discoveryAmbiguous = false;
+                    if (discovery != null) discovery.stop();
+                    refreshSettingsFields();
+                    String message = "تم اعتماد StageCore Hub بعد تطابق TLS والهوية: "
+                            + appSettings.serverLabel();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Trust Hub", message, "READY ✅", true);
+                    pokeHeartbeat();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    String message = "فشل اعتماد Hub: " + error.getClass().getSimpleName();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Trust Hub", message, "FAILED ❌", true);
+                });
+            }
+        });
+    }
+
+    private void verifyRememberedHubEndpoint(StageCoreHubCandidate candidate) {
+        hubTrustWorker.execute(() -> {
+            try {
+                okhttp3.OkHttpClient transport = StageCoreHubTransport.makeClient(
+                        candidate.resolvedHost,
+                        candidate.tlsCertificateSha256);
+                StageCoreHubIdentityVerifier.verify(candidate.baseUrl(), transport, candidate);
+                runOnUiThread(() -> {
+                    if (!appSettings.matchesTrustedHub(candidate)) return;
+                    appSettings.trustHub(candidate);
+                    appSettings.save(MainActivity.this);
+                    refreshSettingsFields();
+                    String message = "تم التحقق من Hub الموثوق وتحديث عنوانه: "
+                            + appSettings.serverLabel();
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "READY ✅", true);
+                    pokeHeartbeat();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    String message = "تم تجاهل عنوان Hub محفوظ الهوية لأن تحقق TLS/identity فشل.";
+                    if (discoveryInfo != null) discoveryInfo.setText(message);
+                    showActionResult("Discovery", message, "CHECK ⚠️", true);
+                });
+            }
+        });
+    }
+
+    private static boolean sameHubCandidate(
+            StageCoreHubCandidate first, StageCoreHubCandidate second) {
+        return first != null
+                && second != null
+                && first.hubId.equals(second.hubId)
+                && first.fingerprint.equals(second.fingerprint)
+                && first.tlsCertificateSha256.equals(second.tlsCertificateSha256)
+                && first.resolvedHost.equals(second.resolvedHost)
+                && first.port == second.port;
+    }
+
     private void stopDiscovery() {
         if (discovery != null) discovery.stop();
         if (discoveryInfo != null) discoveryInfo.setText("تم إيقاف البحث التلقائي.");
@@ -548,6 +787,14 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     }
 
     private void reloadManifestAndScan() {
+        if (stageCoreOwnsPlayback()) {
+            showResult(
+                    "Reload + Scan",
+                    CommandResult.rejected(
+                            "STAGECORE_AUTHORITY_ACTIVE",
+                            "Manifest reload is disabled while the authenticated StageCore runtime channel is connected"));
+            return;
+        }
         loadExternalOrSample();
         String details = "تمت إعادة تحميل المنفست.\n\n" + compactMediaScanSummary() + "\n\n" + cuePreviewSummary();
         showActionResult("Reload + Scan", details, details.contains("النواقص: 0") ? "READY ✅" : "CHECK ⚠️", true);
@@ -556,6 +803,37 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
     private void loadExternalOrSample() {
         manifestStore.tryLoadFromDiskOrSample(mediaResolver.manifestFile());
+    }
+
+    private interface LocalPlaybackAction {
+        CommandResult run();
+    }
+
+    private boolean stageCoreOwnsPlayback() {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        return connection != null && connection.ownsPlaybackAuthority();
+    }
+
+    private boolean legacyOscBlocked() {
+        // Once this tablet has explicitly trusted a StageCore Hub, a runtime
+        // outage must not hand remote playback authority to unauthenticated
+        // legacy UDP OSC. Local on-device recovery controls remain separate.
+        AppSettings persisted = AppSettings.load(this);
+        return stageCoreOwnsPlayback() || (persisted != null && persisted.hasTrustedHub());
+    }
+
+    private CommandResult localPlaybackAuthorityRejected() {
+        return CommandResult.rejected(
+                "STAGECORE_AUTHORITY_ACTIVE",
+                "Local playback controls are disabled while the authenticated StageCore runtime channel is connected");
+    }
+
+    private void runLocalPlaybackAction(String actionName, LocalPlaybackAction action) {
+        if (stageCoreOwnsPlayback()) {
+            showResult(actionName, localPlaybackAuthorityRejected());
+            return;
+        }
+        showResult(actionName, action.run());
     }
 
     private void showResult(String actionName, CommandResult result) {
@@ -604,11 +882,16 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
     private void updateStatusHeader() {
         if (statusHeader == null || appSettings == null || stageCoreClient == null) return;
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        String runtime = connection == null ? "UNAVAILABLE" : connection.status();
         statusHeader.setText("الجهاز: " + stageCoreClient.deviceName()
                 + "\nالسيرفر: " + appSettings.serverLabel()
+                + " | Hub: " + appSettings.hubTrustLabel()
+                + " | StageCore: " + runtime
                 + " | Heartbeat: " + appSettings.heartbeatLabel()
                 + "\nالصورة: " + appSettings.videoScaleMode
                 + " | الاتجاه: " + appSettings.orientationMode
+                + " | دوران Live: " + appSettings.liveRotationDegrees + "°"
                 + " | السطوع: " + appSettings.brightnessPercent + "%"
                 + "\nآخر أمر: " + lastAction + " — " + lastActionState);
     }
@@ -691,10 +974,22 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         String scan = compactMediaScanSummary();
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
         boolean missing = !scan.contains("النواقص: 0");
-        String status = hasPermission && !missing ? "READY ✅" : "CHECK NEEDED ⚠️";
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        boolean runtimeReady = connection != null && connection.runtimeReady();
+        String runtimeStatus = connection == null ? "UNAVAILABLE" : connection.status();
+        String pairingCode = connection == null ? "" : connection.pendingPairingCode();
+        String pairingLine = pairingCode == null || pairingCode.trim().isEmpty()
+                ? ""
+                : "\nPairing code: " + pairingCode.trim();
+        String status = hasPermission && !missing && appSettings.hasTrustedHub() && runtimeReady
+                ? "READY ✅" : "CHECK NEEDED ⚠️";
         return "فحص قبل العرض: " + status
                 + "\nالصلاحيات: " + storagePermissionState()
                 + "\nالسيرفر: " + appSettings.serverLabel()
+                + "\nHub trust: " + appSettings.hubTrustLabel()
+                + "\nStageCore runtime: " + runtimeStatus
+                + pairingLine
+                + "\n" + assignmentSummary(connection)
                 + "\nHeartbeat: " + appSettings.heartbeatLabel()
                 + "\nKeep awake: " + (appSettings.keepScreenAwake ? "مفعل" : "متوقف")
                 + "\n\n" + scan
@@ -746,13 +1041,26 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     }
 
     private void testLiveUrl() {
+        if (stageCoreOwnsPlayback()) {
+            showResult("Test Live URL", localPlaybackAuthorityRejected());
+            return;
+        }
         String url = value(liveUrlInput, "");
         if (url.trim().isEmpty()) {
             lastError = "Live URL missing";
-            showActionResult("Test Live URL", "Live URL فارغ. اكتب رابط مثل:\nhttp://192.168.3.80:81/stream", "FAILED ❌", true);
+            showActionResult(
+                    "Test Live URL",
+                    "Live URL فارغ. استخدم Camera Relay مثل:\nhttp://<relay-ip>:9081/api/v0/stream",
+                    "FAILED ❌",
+                    true);
             return;
         }
-        showResult("Test Live URL", player.showLive(url));
+        CommandResult result = player.showLive(url);
+        if (!"OK".equals(result.code)) {
+            showResult("Test Live URL", result);
+        } else {
+            showActionResult("Test Live URL", "Connecting to Live URL; waiting for first frame.", "CHECK ⚠️", true);
+        }
     }
 
     private void enterShowModeNow() {
@@ -766,9 +1074,65 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         if (readinessBadge == null || mediaResolver == null || manifestStore == null || appSettings == null) return;
         String scan = mediaResolver.scanSummary(manifestStore.activeManifest());
         boolean hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager();
-        boolean ready = hasPermission && scan.contains("النواقص: 0");
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        boolean ready = hasPermission
+                && scan.contains("النواقص: 0")
+                && appSettings.hasTrustedHub()
+                && connection != null
+                && connection.runtimeReady();
         readinessBadge.setText(ready ? "جاهزية العرض: READY ✅" : "جاهزية العرض: تحتاج فحص ⚠️");
         readinessBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
+    }
+
+    private void refreshStageCoreConnectionStatus() {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        if (stageCoreRuntimeBadge != null) {
+            if (connection == null) {
+                stageCoreRuntimeBadge.setText("StageCore runtime: UNAVAILABLE");
+                stageCoreRuntimeBadge.setBackgroundColor(0x55AA8833);
+            } else {
+                boolean ready = connection.runtimeReady();
+                String pairingCode = connection.pendingPairingCode();
+                String pairing = pairingCode == null || pairingCode.trim().isEmpty()
+                        ? ""
+                        : "\nPairing code: " + pairingCode.trim();
+                stageCoreRuntimeBadge.setText("StageCore runtime: " + connection.status()
+                        + pairing
+                        + "\n" + assignmentSummary(connection));
+                stageCoreRuntimeBadge.setBackgroundColor(ready ? 0x5533AA55 : 0x55AA8833);
+            }
+        }
+        updateReadinessBadge();
+        updateStatusHeader();
+    }
+
+    private StageCoreDeviceConnection officialDeviceConnection() {
+        android.app.Application application = getApplication();
+        if (!(application instanceof StageCoreApplication)) return null;
+        return ((StageCoreApplication) application).deviceConnection();
+    }
+
+    private void requestDeviceReconnect(String reason) {
+        StageCoreDeviceConnection connection = officialDeviceConnection();
+        if (connection != null) connection.reconnectNow(reason);
+    }
+
+    private static String assignmentSummary(StageCoreDeviceConnection connection) {
+        if (connection == null) return "Assignment: unavailable";
+        String state = connection.assignmentState();
+        if (!"ACTIVE".equals(state)) {
+            return "Assignment: " + state + " | epoch=" + connection.assignmentEpoch();
+        }
+        return "Assignment: ACTIVE"
+                + " | epoch=" + connection.assignmentEpoch()
+                + " | project=" + compactId(connection.assignedProjectId())
+                + " | snapshot=" + compactId(connection.assignedRuntimeSnapshotId());
+    }
+
+    private static String compactId(String value) {
+        if (value == null || value.trim().isEmpty()) return "-";
+        String trimmed = value.trim();
+        return trimmed.length() <= 12 ? trimmed : trimmed.substring(0, 12) + "…";
     }
 
     @Override
@@ -849,10 +1213,23 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     }
 
     private void saveSettingsFromFieldsWithoutRender() {
+        String previousDeviceId = appSettings.deviceId;
+        String previousDeviceName = appSettings.deviceName;
+        String previousServerHost = appSettings.serverHost;
+        int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
         appSettings.deviceName = value(deviceNameInput, appSettings.deviceName);
         appSettings.serverHost = value(serverHostInput, appSettings.serverHost);
         appSettings.serverPort = parsePort(value(serverPortInput, String.valueOf(appSettings.serverPort)), appSettings.serverPort);
+        boolean endpointChanged = !sameEndpoint(
+                previousServerHost, previousServerPort,
+                appSettings.serverHost, appSettings.serverPort);
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
+                || !previousDeviceName.equals(appSettings.deviceName);
+        if (endpointChanged) {
+            appSettings.clearTrustedHub();
+            pendingHubCandidate = null;
+        }
         appSettings.autoDiscover = autoDiscoverCheck == null || autoDiscoverCheck.isChecked();
         appSettings.showModeOnLaunch = showModeCheck == null || showModeCheck.isChecked();
         appSettings.showLockEnabled = showLockCheck == null || showLockCheck.isChecked();
@@ -860,12 +1237,18 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         appSettings.heartbeatEnabled = heartbeatCheck == null || heartbeatCheck.isChecked();
         appSettings.save(this);
         stageCoreClient = new StageCoreClient(appSettings.deviceId, appSettings.deviceName);
+        if (endpointChanged || identityChanged) {
+            requestDeviceReconnect(endpointChanged
+                    ? "StageCore endpoint/trust changed"
+                    : "Tablet identity changed");
+        }
         applyAwakeFlag();
     }
 
     private String buildInfoSummary() {
         return "Version: " + BuildConfig.VERSION_NAME
                 + " (" + BuildConfig.VERSION_CODE + ")"
+                + "\nRevision: " + BuildConfig.BUILD_REVISION
                 + "\nBuild: " + BuildConfig.BUILD_LABEL
                 + "\nPackage: " + getPackageName();
     }
@@ -874,6 +1257,12 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         if (editText == null || editText.getText() == null) return fallback;
         String value = editText.getText().toString().trim();
         return value.isEmpty() ? fallback : value;
+    }
+
+    private static boolean sameEndpoint(String aHost, int aPort, String bHost, int bPort) {
+        String a = aHost == null ? "" : aHost.trim();
+        String b = bHost == null ? "" : bHost.trim();
+        return aPort == bPort && a.equalsIgnoreCase(b);
     }
 
     private static int parsePort(String value, int fallback) {
