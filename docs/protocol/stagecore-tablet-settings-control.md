@@ -1,8 +1,13 @@
 # StageCore Tablet Settings Control
 
-## V1 official-channel status
+## Authenticated v2 status
 
-This document describes the settings-control foundation and future control surface. In Tablet Player V1 RC3 these settings/media-maintenance capabilities are **not advertised in `device.hello`** and are **not executable through `stagecore.device/1`** yet. Production capability advertisement is limited to commands implemented by `StageCoreRuntimeBridge`. Local settings and rehearsal utilities remain available on-device until a later StageCore slice implements the authenticated settings commands end to end. Foundation
+The current v2 candidate implements two production settings controls end to end over the authenticated StageCore Device channel:
+
+- `TABLET_BRIGHTNESS_SET` with capability `tablet.settings.brightness.set`
+- `TABLET_SHOW_MODE_SET` with capability `tablet.settings.show_mode.set`
+
+The broader generic settings contract remains foundation-only and is **not** advertised as a blanket `tablet.settings.apply` capability. Local settings remain available for setup/rehearsal.
 
 ## Purpose
 
@@ -28,7 +33,16 @@ The app advertises these as capabilities in `device.hello`. StageCore should not
 
 ## Command types
 
-The planned command names are:
+The currently executable production commands are:
+
+```text
+TABLET_BRIGHTNESS_SET
+TABLET_SHOW_MODE_SET
+```
+
+They use the normal authenticated StageCore command envelope and Hub-owned Project/Runtime Snapshot scope. Brightness accepts only `brightness_percent` in the app-supported 5..100 range. Show Mode accepts only boolean `show_mode`; changing Show Mode does not change playback, Project assignment, or the launch preference.
+
+The remaining foundation command names are:
 
 ```text
 /tablet.settings.read
