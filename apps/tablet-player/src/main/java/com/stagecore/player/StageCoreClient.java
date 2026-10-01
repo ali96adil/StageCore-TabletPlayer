@@ -43,7 +43,9 @@ public final class StageCoreClient {
                 "tablet.media.overlay.play",
                 "tablet.media.overlay.clear",
                 "tablet.media.live.show",
-                "tablet.media.live.hide"
+                "tablet.media.live.hide",
+                "tablet.settings.brightness.set",
+                "tablet.settings.show_mode.set"
         ));
     }
 
