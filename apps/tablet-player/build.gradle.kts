@@ -15,8 +15,8 @@ android {
         applicationId = "com.stagecore.player"
         minSdk = 26
         targetSdk = 35
-        versionCode = 103
-        versionName = "1.0.0-rc4"
+        versionCode = 104
+        versionName = "1.0.0-rc5"
         buildConfigField("String", "BUILD_LABEL", "\"© 2026 Ali Adil — ali96adil@gmail.com — All rights reserved\"")
         buildConfigField("String", "BUILD_REVISION", "\"$stageCoreBuildRevision\"")
     }
