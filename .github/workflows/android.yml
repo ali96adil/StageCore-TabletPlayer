@@ -19,6 +19,10 @@ jobs:
           packages: platform-tools
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: stagecore-tablet-debug-keystore-v1
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
