@@ -1,8 +1,12 @@
 # StageCore Tablet Health Heartbeat Foundation
 
-## V1 transport status
+## Transport status
 
-The existing UDP heartbeat remains a rehearsal/status compatibility path. Tablet Player V1 RC3 does **not** advertise `tablet.health.*` as executable Stage Device capabilities. The authenticated production channel reports runtime state with `device.observation`; periodic authenticated health telemetry can be added later without pretending an unsupported command exists.
+The existing UDP heartbeat remains a rehearsal/status compatibility path and does not grant command authority.
+
+Tablet Player rc5 also publishes lightweight health telemetry through the authenticated `stagecore.device/2` `device.observation` path. The v2 observation is sent on important runtime changes and every 10 seconds while the authenticated WebSocket remains current. Health is nested under `observed_state.health` and remains observational only.
+
+Current authenticated fields include `battery_percent`, `battery_charging`, `power_save`, `brightness_percent`, `orientation_mode`, `show_lock_enabled`, `show_mode_on_launch`, `keep_screen_awake`, and `observed_at_ms`.
 
 ## Purpose
 
