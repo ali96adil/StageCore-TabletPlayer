@@ -63,6 +63,17 @@ public final class StageCoreRuntimeBridgeTest {
     }
 
     @Test
+    public void mainPlaybackEndBehaviorValidationIsStrict() {
+        assertTrue(StageCoreRuntimeBridge.isAllowedMainEndBehavior("none"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedMainEndBehavior("hold"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedMainEndBehavior("blackout"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedMainEndBehavior("stop"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedMainEndBehavior("clear"));
+        assertFalse(StageCoreRuntimeBridge.isAllowedMainEndBehavior("loop"));
+        assertFalse(StageCoreRuntimeBridge.isAllowedMainEndBehavior(""));
+    }
+
+    @Test
     public void assignedObservationKeepsHubScopeSeparateFromTypedPlayerState() {
         Map<String, Object> player = new LinkedHashMap<>();
         player.put("main_media", "actor-01.mp4");
