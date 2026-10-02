@@ -44,6 +44,25 @@ public final class StageCoreRuntimeBridgeTest {
     }
 
     @Test
+    public void remoteDisplaySettingValidationIsStrict() {
+        assertTrue(StageCoreRuntimeBridge.isAllowedVideoScale("FIT"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedVideoScale("CROP"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedVideoScale("FULL"));
+        assertFalse(StageCoreRuntimeBridge.isAllowedVideoScale("ZOOM"));
+
+        assertTrue(StageCoreRuntimeBridge.isAllowedOrientation("AUTO"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedOrientation("PORTRAIT"));
+        assertTrue(StageCoreRuntimeBridge.isAllowedOrientation("LANDSCAPE"));
+        assertFalse(StageCoreRuntimeBridge.isAllowedOrientation("SIDEWAYS"));
+
+        assertTrue(StageCoreRuntimeBridge.isAllowedLiveRotation(0));
+        assertTrue(StageCoreRuntimeBridge.isAllowedLiveRotation(90));
+        assertTrue(StageCoreRuntimeBridge.isAllowedLiveRotation(180));
+        assertTrue(StageCoreRuntimeBridge.isAllowedLiveRotation(270));
+        assertFalse(StageCoreRuntimeBridge.isAllowedLiveRotation(45));
+    }
+
+    @Test
     public void assignedObservationKeepsHubScopeSeparateFromTypedPlayerState() {
         Map<String, Object> player = new LinkedHashMap<>();
         player.put("main_media", "actor-01.mp4");

@@ -18,6 +18,9 @@ public final class StageCoreSettingsContract {
     public static final String COMMAND_SETTINGS_RESET = "tablet.settings.reset";
     public static final String COMMAND_BRIGHTNESS_SET = "TABLET_BRIGHTNESS_SET";
     public static final String COMMAND_SHOW_MODE_SET = "TABLET_SHOW_MODE_SET";
+    public static final String COMMAND_VIDEO_SCALE_SET = "TABLET_VIDEO_SCALE_SET";
+    public static final String COMMAND_ORIENTATION_SET = "TABLET_ORIENTATION_SET";
+    public static final String COMMAND_LIVE_ROTATION_SET = "TABLET_LIVE_ROTATION_SET";
     public static final String COMMAND_MEDIA_SCAN = "tablet.media.scan";
     public static final String COMMAND_MEDIA_PREPARE_FOLDER = "tablet.media.prepare_folder";
     public static final String COMMAND_PERMISSIONS_CHECK = "tablet.permissions.check";
@@ -34,6 +37,7 @@ public final class StageCoreSettingsContract {
                 "tablet.settings.brightness.set",
                 "tablet.settings.video_scale.set",
                 "tablet.settings.orientation.set",
+                "tablet.settings.live_rotation.set",
                 "tablet.settings.show_mode.set",
                 "tablet.settings.show_lock.set",
                 "tablet.permissions.check",
@@ -52,6 +56,7 @@ public final class StageCoreSettingsContract {
                 "brightness_percent",
                 "video_scale_mode",
                 "orientation_mode",
+                "live_rotation_degrees",
                 "show_mode_on_launch",
                 "show_lock_enabled"
         );
