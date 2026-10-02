@@ -102,7 +102,7 @@ public final class MediaResolver {
             }
         }
 
-        String manifestStatus = manifestFile().exists() ? "موجود" : "غير موجود، راح يستخدم sample داخلي";
+        String manifestStatus = manifestFile().exists() ? "موجود" : "غير موجود، راح يكتشف ملفات main_/overlay_ تلقائياً";
         String result = "فحص ملفات الفيديو"
                 + "\nmain موجودة: " + mainCount + "/6"
                 + "\noverlay موجودة: " + overlayCount + "/99"
