@@ -44,7 +44,10 @@ public final class StageCoreClient {
                 "tablet.media.live.show",
                 "tablet.media.live.hide",
                 "tablet.settings.brightness.set",
-                "tablet.settings.show_mode.set"
+                "tablet.settings.show_mode.set",
+                "tablet.settings.video_scale.set",
+                "tablet.settings.orientation.set",
+                "tablet.settings.live_rotation.set"
         ));
     }
 
