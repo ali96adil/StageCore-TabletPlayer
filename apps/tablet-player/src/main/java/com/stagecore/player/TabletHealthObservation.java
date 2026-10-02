@@ -30,7 +30,9 @@ public final class TabletHealthObservation {
             health.put("battery_charging", battery.charging);
             health.put("power_save", isPowerSaveMode(app));
             health.put("brightness_percent", settings.brightnessPercent);
+            health.put("video_scale_mode", settings.videoScaleMode);
             health.put("orientation_mode", settings.orientationMode);
+            health.put("live_rotation_degrees", settings.liveRotationDegrees);
             health.put("show_lock_enabled", settings.showLockEnabled);
             health.put("show_mode_on_launch", settings.showModeOnLaunch);
             health.put("keep_screen_awake", settings.keepScreenAwake);
