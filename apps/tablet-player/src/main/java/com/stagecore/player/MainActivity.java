@@ -1158,6 +1158,48 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
     }
 
     @Override
+    public CommandResult setVideoScaleMode(String mode) {
+        if (!AppSettings.SCALE_FULL.equals(mode) && !AppSettings.SCALE_FIT.equals(mode) && !AppSettings.SCALE_CROP.equals(mode)) {
+            return CommandResult.rejected("INVALID_VIDEO_SCALE", "Video scale must be FULL, FIT, or CROP");
+        }
+        appSettings.videoScaleMode = mode;
+        appSettings.save(this);
+        player.setVideoScaleMode(mode);
+        updateStatusHeader();
+        pokeHeartbeat();
+        return CommandResult.completed("Video scale applied: " + mode);
+    }
+
+    @Override
+    public CommandResult setOrientationMode(String mode) {
+        if (!AppSettings.ORIENTATION_AUTO.equals(mode) && !AppSettings.ORIENTATION_LANDSCAPE.equals(mode) && !AppSettings.ORIENTATION_PORTRAIT.equals(mode)) {
+            return CommandResult.rejected("INVALID_ORIENTATION", "Orientation must be AUTO, LANDSCAPE, or PORTRAIT");
+        }
+        appSettings.orientationMode = mode;
+        appSettings.save(this);
+        applyOrientation(mode);
+        updateStatusHeader();
+        pokeHeartbeat();
+        return CommandResult.completed("Orientation applied: " + mode);
+    }
+
+    @Override
+    public CommandResult setLiveRotationDegrees(int degrees) {
+        if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270) {
+            return CommandResult.rejected("INVALID_LIVE_ROTATION", "Live rotation must be 0, 90, 180, or 270 degrees");
+        }
+        appSettings.liveRotationDegrees = degrees;
+        appSettings.save(this);
+        player.setLiveRotation(degrees);
+        if (liveRotationLabel != null) {
+            liveRotationLabel.setText("Live Rotation: " + degrees + "°");
+        }
+        updateStatusHeader();
+        pokeHeartbeat();
+        return CommandResult.completed("Live rotation applied: " + degrees + "°");
+    }
+
+    @Override
     public JSONObject observedHealth() {
         return heartbeatReporter == null ? new JSONObject() : heartbeatReporter.authenticatedHealthSnapshot();
     }
