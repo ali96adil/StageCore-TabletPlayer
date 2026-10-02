@@ -12,7 +12,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 public final class ManifestStore {
@@ -34,7 +37,62 @@ public final class ManifestStore {
         try {
             return loadFromDisk(manifestFile);
         } catch (Exception ignored) {
-            return loadBundledSample();
+            TabletManifest discovered = loadAutoDiscoveredMedia(manifestFile);
+            return discovered != null ? discovered : loadBundledSample();
+        }
+    }
+
+    TabletManifest loadAutoDiscoveredMedia(File manifestFile) {
+        if (manifestFile == null) return null;
+        File folder = manifestFile.getParentFile();
+        if (folder == null || !folder.exists() || !folder.isDirectory()) return null;
+
+        File[] files = folder.listFiles();
+        if (files == null || files.length == 0) return null;
+        Arrays.sort(files, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
+
+        Map<String, MediaItemRef> media = new LinkedHashMap<>();
+        for (File file : files) {
+            if (file == null || !file.isFile() || !file.canRead()) continue;
+            String name = file.getName();
+            String lower = name.toLowerCase(Locale.US);
+            addAutoDiscoveredMedia(media, lower, name, "main_", "main");
+            addAutoDiscoveredMedia(media, lower, name, "overlay_", "overlay");
+        }
+        if (media.isEmpty()) return null;
+
+        activeManifest = new TabletManifest(
+                "tablet_manifest/1",
+                "hub_authoritative_v2",
+                "hub_authoritative_v2",
+                "tablet_manifest_auto_media_v1",
+                "StageCore Auto Media",
+                media,
+                Collections.emptyList()
+        );
+        activeSource = "auto-discovered TheatreVideos";
+        return activeManifest;
+    }
+
+    private static void addAutoDiscoveredMedia(
+            Map<String, MediaItemRef> media,
+            String lowerName,
+            String actualName,
+            String filenamePrefix,
+            String mediaType) {
+        if (!lowerName.startsWith(filenamePrefix) || !lowerName.endsWith(".mp4")) return;
+        String numberPart = lowerName.substring(filenamePrefix.length(), lowerName.length() - 4);
+        if (numberPart.isEmpty()) return;
+        int number;
+        try {
+            number = Integer.parseInt(numberPart);
+        } catch (NumberFormatException ignored) {
+            return;
+        }
+        if (number < 1) return;
+        String key = String.format(Locale.US, "%s.%02d", mediaType, number);
+        if (!media.containsKey(key)) {
+            media.put(key, new MediaItemRef(key, mediaType, actualName, null));
         }
     }
 
