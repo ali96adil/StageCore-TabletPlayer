@@ -89,9 +89,13 @@ public final class ManifestExecutor {
     }
 
     public CommandResult playMain(int number) {
+        return playMain(number, true, TabletAction.END_NONE);
+    }
+
+    public CommandResult playMain(int number, boolean loop, String endBehavior) {
         String key = String.format(java.util.Locale.US, "main.%02d", number);
         File file = mediaResolver.resolveFile(activeManifest(), key);
-        return player.playMain(file);
+        return player.playMain(file, loop, endBehavior);
     }
 
     public CommandResult prepareMain(int number) {
