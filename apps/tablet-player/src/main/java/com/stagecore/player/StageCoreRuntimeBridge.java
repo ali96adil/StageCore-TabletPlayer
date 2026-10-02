@@ -283,7 +283,7 @@ public final class StageCoreRuntimeBridge {
                 SettingsExecutor settings = SETTINGS_EXECUTOR.get();
                 if (settings == null) return CommandResult.failed("SETTINGS_NOT_READY", "Tablet settings controller is not ready");
                 String mode = payload.optString("video_scale_mode", "").trim();
-                if (!AppSettings.SCALE_FULL.equals(mode) && !AppSettings.SCALE_FIT.equals(mode) && !AppSettings.SCALE_CROP.equals(mode)) {
+                if (!isAllowedVideoScale(mode)) {
                     return CommandResult.rejected("INVALID_VIDEO_SCALE", "video_scale_mode must be FULL, FIT, or CROP");
                 }
                 return settings.setVideoScaleMode(mode);
@@ -292,7 +292,7 @@ public final class StageCoreRuntimeBridge {
                 SettingsExecutor settings = SETTINGS_EXECUTOR.get();
                 if (settings == null) return CommandResult.failed("SETTINGS_NOT_READY", "Tablet settings controller is not ready");
                 String mode = payload.optString("orientation_mode", "").trim();
-                if (!AppSettings.ORIENTATION_AUTO.equals(mode) && !AppSettings.ORIENTATION_LANDSCAPE.equals(mode) && !AppSettings.ORIENTATION_PORTRAIT.equals(mode)) {
+                if (!isAllowedOrientation(mode)) {
                     return CommandResult.rejected("INVALID_ORIENTATION", "orientation_mode must be AUTO, LANDSCAPE, or PORTRAIT");
                 }
                 return settings.setOrientationMode(mode);
@@ -304,7 +304,7 @@ public final class StageCoreRuntimeBridge {
                     return CommandResult.rejected("INVALID_LIVE_ROTATION", "live_rotation_degrees is required");
                 }
                 int degrees = payload.optInt("live_rotation_degrees", -1);
-                if (degrees != 0 && degrees != 90 && degrees != 180 && degrees != 270) {
+                if (!isAllowedLiveRotation(degrees)) {
                     return CommandResult.rejected("INVALID_LIVE_ROTATION", "live_rotation_degrees must be 0, 90, 180, or 270");
                 }
                 return settings.setLiveRotationDegrees(degrees);
@@ -331,6 +331,22 @@ public final class StageCoreRuntimeBridge {
             return executor.showLiveUrlAsync(directUrl, listener);
         }
         return executor.showLiveAsync(mediaKey, listener);
+    }
+
+    static boolean isAllowedVideoScale(String mode) {
+        return AppSettings.SCALE_FULL.equals(mode)
+                || AppSettings.SCALE_FIT.equals(mode)
+                || AppSettings.SCALE_CROP.equals(mode);
+    }
+
+    static boolean isAllowedOrientation(String mode) {
+        return AppSettings.ORIENTATION_AUTO.equals(mode)
+                || AppSettings.ORIENTATION_LANDSCAPE.equals(mode)
+                || AppSettings.ORIENTATION_PORTRAIT.equals(mode);
+    }
+
+    static boolean isAllowedLiveRotation(int degrees) {
+        return degrees == 0 || degrees == 90 || degrees == 180 || degrees == 270;
     }
 
     static boolean hasExactlyOneMediaSelector(
