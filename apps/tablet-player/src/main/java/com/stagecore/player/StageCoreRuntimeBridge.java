@@ -3,6 +3,7 @@ package com.stagecore.player;
 import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.CommandStatus;
 import com.stagecore.player.model.TabletManifest;
+import com.stagecore.player.model.TabletAction;
 
 import org.json.JSONObject;
 
@@ -227,9 +228,23 @@ public final class StageCoreRuntimeBridge {
                 }
                 if (payload.has("media_number")) {
                     int mediaNumber = payload.optInt("media_number", -1);
-                    return mediaNumber < 1
-                            ? CommandResult.rejected("MEDIA_SELECTOR_INVALID", "media_number must be positive")
-                            : executor.playMain(mediaNumber);
+                    if (mediaNumber < 1) {
+                        return CommandResult.rejected("MEDIA_SELECTOR_INVALID", "media_number must be positive");
+                    }
+                    if (payload.has("loop") && !(payload.opt("loop") instanceof Boolean)) {
+                        return CommandResult.rejected("PLAYBACK_LOOP_INVALID", "loop must be boolean");
+                    }
+                    String endBehavior = payload.optString("end_behavior", TabletAction.END_NONE)
+                            .trim().toLowerCase(java.util.Locale.US);
+                    if (!isAllowedMainEndBehavior(endBehavior)) {
+                        return CommandResult.rejected(
+                                "PLAYBACK_END_BEHAVIOR_INVALID",
+                                "end_behavior must be hold, blackout, clear, stop, or none");
+                    }
+                    return executor.playMain(
+                            mediaNumber,
+                            payload.has("loop") ? payload.optBoolean("loop") : true,
+                            endBehavior);
                 }
                 return CommandResult.rejected(
                         "MEDIA_SELECTOR_REQUIRED",
@@ -331,6 +346,14 @@ public final class StageCoreRuntimeBridge {
             return executor.showLiveUrlAsync(directUrl, listener);
         }
         return executor.showLiveAsync(mediaKey, listener);
+    }
+
+    static boolean isAllowedMainEndBehavior(String value) {
+        return TabletAction.END_NONE.equals(value)
+                || TabletAction.END_HOLD.equals(value)
+                || TabletAction.END_BLACKOUT.equals(value)
+                || TabletAction.END_STOP.equals(value)
+                || TabletAction.END_CLEAR.equals(value);
     }
 
     static boolean isAllowedVideoScale(String mode) {
