@@ -1,7 +1,9 @@
 package com.stagecore.player;
 
+import com.stagecore.player.model.CommandResult;
 import com.stagecore.player.model.CommandStatus;
 
+import org.json.JSONObject;
 import org.junit.Test;
 
 import java.util.LinkedHashMap;
@@ -41,6 +43,62 @@ public final class StageCoreRuntimeBridgeTest {
         assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(false, false, false));
         assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(true, false, true));
         assertFalse(StageCoreRuntimeBridge.hasExactlyOneMediaSelector(true, true, true));
+    }
+
+    @Test
+    public void authenticatedDisplaySettingsExecuteThroughTypedContract() throws Exception {
+        class FakeSettings implements StageCoreRuntimeBridge.SettingsExecutor {
+            String scale = "";
+            String orientation = "";
+            int rotation = -1;
+
+            @Override public CommandResult setBrightnessPercent(int percent) { return CommandResult.completed("brightness"); }
+            @Override public CommandResult setShowMode(boolean enabled) { return CommandResult.completed("show"); }
+            @Override public CommandResult setVideoScaleMode(String mode) {
+                scale = mode;
+                return CommandResult.completed("scale");
+            }
+            @Override public CommandResult setOrientationMode(String mode) {
+                orientation = mode;
+                return CommandResult.completed("orientation");
+            }
+            @Override public CommandResult setLiveRotationDegrees(int degrees) {
+                rotation = degrees;
+                return CommandResult.completed("rotation");
+            }
+            @Override public JSONObject observedHealth() { return new JSONObject(); }
+        }
+
+        FakeSettings settings = new FakeSettings();
+        StageCoreRuntimeBridge.registerSettings(settings);
+        try {
+            assertEquals(CommandStatus.COMPLETED, StageCoreRuntimeBridge.execute(
+                    "TABLET_VIDEO_SCALE_SET",
+                    new JSONObject().put("video_scale_mode", "CROP")).status);
+            assertEquals("CROP", settings.scale);
+
+            assertEquals(CommandStatus.COMPLETED, StageCoreRuntimeBridge.execute(
+                    "TABLET_ORIENTATION_SET",
+                    new JSONObject().put("orientation_mode", "PORTRAIT")).status);
+            assertEquals("PORTRAIT", settings.orientation);
+
+            assertEquals(CommandStatus.COMPLETED, StageCoreRuntimeBridge.execute(
+                    "TABLET_LIVE_ROTATION_SET",
+                    new JSONObject().put("live_rotation_degrees", 90)).status);
+            assertEquals(90, settings.rotation);
+
+            assertEquals(CommandStatus.REJECTED, StageCoreRuntimeBridge.execute(
+                    "TABLET_VIDEO_SCALE_SET",
+                    new JSONObject().put("video_scale_mode", "ZOOM")).status);
+            assertEquals(CommandStatus.REJECTED, StageCoreRuntimeBridge.execute(
+                    "TABLET_ORIENTATION_SET",
+                    new JSONObject().put("orientation_mode", "SIDEWAYS")).status);
+            assertEquals(CommandStatus.REJECTED, StageCoreRuntimeBridge.execute(
+                    "TABLET_LIVE_ROTATION_SET",
+                    new JSONObject().put("live_rotation_degrees", 45)).status);
+        } finally {
+            StageCoreRuntimeBridge.unregisterSettings(settings);
+        }
     }
 
     @Test
