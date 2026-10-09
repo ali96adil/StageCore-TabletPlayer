@@ -559,7 +559,6 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
     private void saveSettingsFromFields() {
         String previousDeviceId = appSettings.deviceId;
-        String previousDeviceName = appSettings.deviceName;
         String previousServerHost = appSettings.serverHost;
         int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
@@ -569,8 +568,10 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         boolean endpointChanged = !sameEndpoint(
                 previousServerHost, previousServerPort,
                 appSettings.serverHost, appSettings.serverPort);
-        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
-                || !previousDeviceName.equals(appSettings.deviceName);
+        // Display-name edits are metadata, not identity changes. Reconnecting
+        // while a pairing code is pending abandons the current request and
+        // creates another PENDING row at the Hub.
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId);
         if (endpointChanged) {
             appSettings.clearTrustedHub();
             pendingHubCandidate = null;
@@ -1256,7 +1257,6 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
 
     private void saveSettingsFromFieldsWithoutRender() {
         String previousDeviceId = appSettings.deviceId;
-        String previousDeviceName = appSettings.deviceName;
         String previousServerHost = appSettings.serverHost;
         int previousServerPort = appSettings.serverPort;
         appSettings.deviceId = value(deviceIdInput, appSettings.deviceId);
@@ -1266,8 +1266,10 @@ public final class MainActivity extends Activity implements StageCoreRuntimeBrid
         boolean endpointChanged = !sameEndpoint(
                 previousServerHost, previousServerPort,
                 appSettings.serverHost, appSettings.serverPort);
-        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId)
-                || !previousDeviceName.equals(appSettings.deviceName);
+        // Display-name edits are metadata, not identity changes. Reconnecting
+        // while a pairing code is pending abandons the current request and
+        // creates another PENDING row at the Hub.
+        boolean identityChanged = !previousDeviceId.equals(appSettings.deviceId);
         if (endpointChanged) {
             appSettings.clearTrustedHub();
             pendingHubCandidate = null;
