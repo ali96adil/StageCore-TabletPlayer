@@ -9,6 +9,8 @@ import android.os.Looper;
 import android.widget.ImageView;
 
 import java.io.IOException;
+import okhttp3.Response;
+
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.concurrent.ExecutorService;
@@ -26,6 +28,7 @@ final class MjpegLiveView extends ImageView {
     interface Listener {
         void onReady();
         void onError(String reason);
+        default void onAuthorityLost() { onError("Camera Relay authority ended"); }
     }
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -38,6 +41,7 @@ final class MjpegLiveView extends ImageView {
     private final AtomicReference<Bitmap> pendingFrame = new AtomicReference<>();
     private final AtomicBoolean framePosted = new AtomicBoolean();
     private volatile HttpURLConnection activeConnection;
+    private volatile CameraRelayStream protectedStream;
     private volatile Listener listener;
     private boolean released;
     private Bitmap displayedFrame;
@@ -57,11 +61,35 @@ final class MjpegLiveView extends ImageView {
         worker.execute(() -> readLoop(url, current));
     }
 
+    void playProtected(CameraRelayStream source, Listener listener) {
+        stop();
+        if (released) {
+            source.cancel();
+            return;
+        }
+        this.listener = listener;
+        protectedStream = source;
+        int current = generation.get();
+        source.whenCancelled(() -> main.post(() -> {
+            if (!isCurrent(current)) return;
+            clearFrame();
+            listener.onAuthorityLost();
+        }));
+        worker.execute(() -> readProtected(source, current));
+    }
+
     void stop() {
         generation.incrementAndGet();
         listener = null;
+        CameraRelayStream secure = protectedStream;
+        protectedStream = null;
+        if (secure != null) secure.cancel();
         HttpURLConnection old = activeConnection;
         if (old != null) old.disconnect();
+        clearFrame();
+    }
+
+    private void clearFrame() {
         pendingFrame.set(null);
         framePosted.set(false);
         displayedFrame = null;
@@ -161,25 +189,81 @@ final class MjpegLiveView extends ImageView {
         }
     }
 
+    private void readProtected(CameraRelayStream source, int current) {
+        int retries = 0;
+        while (isCurrent(current)) {
+            try (Response response = source.open()) {
+                if (response.body() == null) throw new IOException("Camera Relay returned no stream");
+                MjpegFrameReader reader = new MjpegFrameReader(response.body().byteStream(),
+                        response.header("Content-Type"));
+                boolean ready = false;
+                while (isCurrent(current) && source.isCurrent()) {
+                    byte[] bytes = reader.nextJpeg();
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap == null) throw new IOException("Cannot decode MJPEG frame");
+                    if (!ready) {
+                        ready = true;
+                        main.post(() -> {
+                            if (!canRender(current)) return;
+                            displayFrame(bitmap);
+                            if (listener != null) listener.onReady();
+                        });
+                    } else {
+                        queueFrame(current, bitmap);
+                    }
+                    retries = 0;
+                }
+                source.terminateIfScopeEnded();
+            } catch (IOException | RuntimeException error) {
+                source.terminateIfScopeEnded();
+                if (!isCurrent(current) || !source.isCurrent()) return;
+                main.post(() -> {
+                    if (isCurrent(current)) clearFrame();
+                });
+                emitError(current, "Camera Relay interrupted");
+                if (++retries >= 3) {
+                    source.cancel();
+                    return;
+                }
+                try {
+                    Thread.sleep(1000L * retries);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            if (!source.isCurrent()) return;
+        }
+    }
+
+    private boolean canRender(int current) {
+        CameraRelayStream secure = protectedStream;
+        return isCurrent(current) && (secure == null || secure.isCurrent());
+    }
+
     private void queueFrame(int current, Bitmap bitmap) {
-        if (!isCurrent(current)) return;
+        if (!canRender(current)) return;
         pendingFrame.set(bitmap);
         if (!framePosted.compareAndSet(false, true)) return;
         main.post(() -> {
-            if (!isCurrent(current)) return;
+            if (!canRender(current)) return;
             framePosted.set(false);
             Bitmap latest = pendingFrame.getAndSet(null);
             if (latest != null) {
-                displayedFrame = latest;
-                setImageBitmap(latest);
-                updateTransform();
+                displayFrame(latest);
             }
         });
     }
 
+    private void displayFrame(Bitmap bitmap) {
+        displayedFrame = bitmap;
+        setImageBitmap(bitmap);
+        updateTransform();
+    }
+
     private void emitReady(int current) {
         main.post(() -> {
-            if (isCurrent(current) && listener != null) listener.onReady();
+            if (canRender(current) && listener != null) listener.onReady();
         });
     }
 

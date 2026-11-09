@@ -69,6 +69,38 @@ public final class StageCoreDeviceConnection {
         this.context = context.getApplicationContext();
     }
 
+    private record CameraSocket(WebSocket socket, String baseUrl, OkHttpClient transport,
+                                StageCorePairingClient.Session session) {}
+
+    private volatile CameraSocket cameraSocket;
+    private final AtomicReference<CameraRelayStream> protectedCamera = new AtomicReference<>();
+
+    private void invalidateProtectedCamera() {
+        CameraRelayStream stream = protectedCamera.getAndSet(null);
+        if (stream != null) stream.cancel();
+    }
+
+    private CameraRelayStream protectedCameraFor(WebSocket socket) {
+        CameraSocket bound = cameraSocket;
+        if (bound == null || bound.socket() != socket) return null;
+        String project = assignedProjectId;
+        String snapshot = assignedRuntimeSnapshotId;
+        long epoch = assignmentEpoch;
+        long generation = connectionGeneration;
+        java.util.function.BooleanSupplier current = () -> cameraSocket == bound
+                && commandScopeStillCurrent(socket, project, snapshot, epoch, generation);
+        if (!current.getAsBoolean()) return null;
+        CameraRelayStream stream = new CameraRelayStream(bound.transport(), bound.baseUrl(), project,
+                bound.session().token, Instant.parse(bound.session().expiresAt), current,
+                () -> main.post(() -> {
+                    if (current.getAsBoolean()) reconnectNow("camera session renewal");
+                }));
+        CameraRelayStream old = protectedCamera.getAndSet(stream);
+        if (old != null) old.cancel();
+        if (!current.getAsBoolean()) stream.cancel();
+        return stream;
+    }
+
     public void start() {
         stopped = false;
         worker.execute(this::connectionLoop);
@@ -76,6 +108,8 @@ public final class StageCoreDeviceConnection {
 
     public void stop() {
         stopped = true;
+        invalidateProtectedCamera();
+        cameraSocket = null;
         WebSocket current = socket;
         socket = null;
         if (current != null) current.close(1000, "tablet stopping");
@@ -182,7 +216,7 @@ public final class StageCoreDeviceConnection {
                     continue;
                 }
                 lastStatus = "AUTHENTICATED";
-                connectWebSocket(baseUrl, settings, descriptor, session, trustedTransport);
+                connectWebSocket(baseUrl, settings, descriptor, session, trustedTransport, attemptGeneration);
                 backoffMs = 1000;
                 while (!stopped && socket != null) sleep(500);
             } catch (javax.net.ssl.SSLException tlsError) {
@@ -288,7 +322,8 @@ public final class StageCoreDeviceConnection {
             AppSettings settings,
             StageCoreClient descriptor,
             StageCorePairingClient.Session session,
-            OkHttpClient trustedTransport) throws Exception {
+            OkHttpClient trustedTransport,
+            long attemptGeneration) throws Exception {
         OkHttpClient websocketClient = trustedTransport.newBuilder()
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -303,6 +338,13 @@ public final class StageCoreDeviceConnection {
         boolean[] opened = {false};
         WebSocket ws = websocketClient.newWebSocket(request, new WebSocketListener() {
             @Override public void onOpen(WebSocket webSocket, Response response) {
+                if (stopped || attemptGeneration != reconnectGeneration.get()) {
+                    webSocket.cancel();
+                    synchronized (openedLock) { openedLock.notifyAll(); }
+                    return;
+                }
+                invalidateProtectedCamera();
+                cameraSocket = new CameraSocket(webSocket, baseUrl, trustedTransport, session);
                 socket = webSocket;
                 socketDeviceId = settings.deviceId;
                 lastStatus = "CONNECTED";
@@ -324,6 +366,7 @@ public final class StageCoreDeviceConnection {
             }
 
             @Override public void onClosing(WebSocket webSocket, int code, String reason) {
+                if (sameSocket(socket, webSocket)) invalidateProtectedCamera();
                 webSocket.close(code, reason);
             }
 
@@ -361,6 +404,8 @@ public final class StageCoreDeviceConnection {
 
     private void clearRuntimeScope(String status) {
         runtimeAuthorityReady = false;
+        cameraSocket = null;
+        invalidateProtectedCamera();
         assignmentState = "UNKNOWN";
         assignmentEpoch = 0;
         connectionGeneration = 0;
@@ -421,6 +466,7 @@ public final class StageCoreDeviceConnection {
         } catch (Exception ignored) {
             lastStatus = "PROTOCOL_ERROR";
             runtimeAuthorityReady = false;
+            invalidateProtectedCamera();
             webSocket.close(1002, "StageCore v2 protocol error");
         }
     }
@@ -447,6 +493,7 @@ public final class StageCoreDeviceConnection {
         }
 
         runtimeAuthorityReady = false;
+        invalidateProtectedCamera();
         assignmentState = state;
         assignmentEpoch = epoch;
         connectionGeneration = generation;
@@ -508,6 +555,7 @@ public final class StageCoreDeviceConnection {
             throw new IllegalStateException("tablet assignment prepare mismatch");
         }
         runtimeAuthorityReady = false;
+        invalidateProtectedCamera();
         // Runtime messages are serialized on main. Perform safe-media and ACK
         // in this same authority turn instead of queueing work that could run
         // after a socket/Project transition.
@@ -727,24 +775,43 @@ public final class StageCoreDeviceConnection {
             token = ++pendingLiveToken;
         }
 
-        CommandResult started = StageCoreRuntimeBridge.executeLiveAsync(
-                payload,
-                new MjpegLiveView.Listener() {
-                    @Override public void onReady() {
-                        finishLiveCommand(
-                                webSocket,
-                                commandId,
-                                token,
-                                CommandResult.completed("Live first frame rendered"),
-                                false);
-                    }
+        MjpegLiveView.Listener listener = new MjpegLiveView.Listener() {
+            @Override public void onReady() {
+                finishLiveCommand(
+                        webSocket,
+                        commandId,
+                        token,
+                        CommandResult.completed("Live first frame rendered"),
+                        false);
+            }
 
-                    @Override public void onError(String reason) {
-                        // MJPEG reader owns bounded reconnect/backoff. Keep the
-                        // command ACCEPTED until a frame arrives or the first-
-                        // frame timeout produces one terminal result.
-                    }
-                });
+            @Override public void onError(String reason) {
+                // MJPEG reader owns bounded reconnect/backoff. Keep the
+                // command ACCEPTED until a frame arrives or the first-
+                // frame timeout produces one terminal result.
+            }
+
+            @Override public void onAuthorityLost() {
+                finishLiveCommand(webSocket, commandId, token,
+                        CommandResult.cancelled("LIVE_AUTHORITY_ENDED", "Camera Relay authority ended"),
+                        false);
+            }
+        };
+        CommandResult started;
+        if (payload != null && CameraRelayStream.MEDIA_KEY.equals(payload.optString("media_key").trim())
+                && payload.optString("url").trim().isEmpty()) {
+            CameraRelayStream source;
+            try {
+                source = protectedCameraFor(webSocket);
+            } catch (IllegalArgumentException | DateTimeParseException invalid) {
+                source = null;
+            }
+            started = source == null
+                    ? CommandResult.rejected("LIVE_AUTHORITY_ENDED", "Camera Relay requires the active runtime session")
+                    : StageCoreRuntimeBridge.executeProtectedLive(source, listener);
+        } else {
+            started = StageCoreRuntimeBridge.executeLiveAsync(payload, listener);
+        }
         if (started.status != CommandStatus.ACCEPTED) {
             clearPendingLiveCommand(webSocket, commandId, token);
             commandIds.complete(commandId);

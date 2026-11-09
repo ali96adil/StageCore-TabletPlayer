@@ -120,6 +120,10 @@ public final class ManifestExecutor {
         return player.showLiveAsync(url, listener);
     }
 
+    CommandResult showProtectedLive(CameraRelayStream source, MjpegLiveView.Listener listener) {
+        return player.showProtectedLive(source, listener);
+    }
+
     public CommandResult showLiveUrl(String url) {
         return player.showLive(url);
     }
