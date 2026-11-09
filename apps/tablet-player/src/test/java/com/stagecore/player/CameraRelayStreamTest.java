@@ -55,6 +55,23 @@ public class CameraRelayStreamTest {
         assertEquals(1, renewals.get()); // Only HTTP 410 invalidates the credential.
     }
 
+    @Test public void staleScopeCannotUseAResponseThatArrivesAfterRevocation() {
+        AtomicBoolean current = new AtomicBoolean(true);
+        AtomicInteger cancellations = new AtomicInteger();
+        AtomicInteger renewals = new AtomicInteger();
+        OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain -> {
+            current.set(false);
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(200).message("fixture").body(ResponseBody.create("", null)).build();
+        }).build();
+        CameraRelayStream stream = new CameraRelayStream(client, "https://hub.local:7843", "project-1",
+                "runtime-token", Instant.now().plusSeconds(30), current::get, renewals::incrementAndGet);
+        stream.whenCancelled(cancellations::incrementAndGet);
+        assertThrows(IOException.class, stream::open);
+        assertEquals(1, cancellations.get());
+        assertEquals(0, renewals.get());
+    }
+
     private static CameraRelayStream stream(int code, Instant expiry, AtomicBoolean current,
                                             AtomicInteger renewals) {
         OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain ->

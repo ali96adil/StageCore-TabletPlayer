@@ -216,14 +216,19 @@ public final class TabletPlayer {
     }
 
     public CommandResult showLive(String url) {
-        return startLive(url, null, false);
+        return startLive(url, null, false, null);
     }
 
     CommandResult showLiveAsync(String url, MjpegLiveView.Listener commandListener) {
-        return startLive(url, commandListener, true);
+        return startLive(url, commandListener, true, null);
     }
 
-    private CommandResult startLive(String url, MjpegLiveView.Listener commandListener, boolean asynchronous) {
+    CommandResult showProtectedLive(CameraRelayStream source, MjpegLiveView.Listener listener) {
+        return startLive(CameraRelayStream.MEDIA_KEY, listener, true, source);
+    }
+
+    private CommandResult startLive(String url, MjpegLiveView.Listener commandListener,
+                                    boolean asynchronous, CameraRelayStream protectedSource) {
         if (url == null || url.trim().isEmpty()) {
             return CommandResult.failed("LIVE_URL_MISSING", "Live URL is missing");
         }
@@ -231,7 +236,7 @@ public final class TabletPlayer {
         hideBlackout();
         hideOverlay(0);
         currentLive = source;
-        if (isMjpegSource(source)) {
+        if (protectedSource != null || isMjpegSource(source)) {
             liveVideo.stopAndReset();
             liveVideo.view.setVisibility(View.GONE);
             mjpegLive.applyScale(videoScaleMode);
@@ -240,7 +245,7 @@ public final class TabletPlayer {
             mjpegLive.setVisibility(View.VISIBLE);
             mjpegLive.bringToFront();
             keepControlsOnTop();
-            mjpegLive.play(source, new MjpegLiveView.Listener() {
+            MjpegLiveView.Listener liveListener = new MjpegLiveView.Listener() {
                 @Override public void onReady() {
                     showStatus("MJPEG live ready");
                     notifyLiveReady(commandListener);
@@ -249,7 +254,13 @@ public final class TabletPlayer {
                     showStatus("MJPEG live: " + reason);
                     notifyLiveError(commandListener, reason);
                 }
-            });
+                @Override public void onAuthorityLost() {
+                    showStatus("Camera Relay authority ended");
+                    if (commandListener != null) commandListener.onAuthorityLost();
+                }
+            };
+            if (protectedSource == null) mjpegLive.play(source, liveListener);
+            else mjpegLive.playProtected(protectedSource, liveListener);
         } else {
             mjpegLive.stop();
             mjpegLive.setVisibility(View.GONE);

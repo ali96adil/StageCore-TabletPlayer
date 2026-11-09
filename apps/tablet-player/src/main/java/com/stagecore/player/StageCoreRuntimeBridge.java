@@ -328,6 +328,15 @@ public final class StageCoreRuntimeBridge {
         }
     }
 
+    static CommandResult executeProtectedLive(CameraRelayStream source, MjpegLiveView.Listener listener) {
+        ManifestExecutor executor = EXECUTOR.get();
+        if (executor == null) {
+            source.cancel();
+            return CommandResult.failed("PLAYER_NOT_READY", "Tablet player is not ready");
+        }
+        return executor.showProtectedLive(source, listener);
+    }
+
     public static CommandResult executeLiveAsync(JSONObject payload, MjpegLiveView.Listener listener) {
         ManifestExecutor executor = EXECUTOR.get();
         if (executor == null) {
