@@ -43,7 +43,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
+      - name: Fetch the StageCore Camera Relay v1 contract
+        uses: actions/checkout@v4
+        with:
+          repository: ali96adil/StageCore
+          ref: dc479ade49387e445da340cce5f708d6fa950b57
+          path: .stagecore-contract
+          persist-credentials: false
+          sparse-checkout: docs/contracts/tablet-camera-relay-v1.json
+          sparse-checkout-cone-mode: false
       - name: Test and build tablet player debug APK
+        env:
+          STAGECORE_CAMERA_CONTRACT: ${{ github.workspace }}/.stagecore-contract/docs/contracts/tablet-camera-relay-v1.json
         run: gradle :apps:tablet-player:testDebugUnitTest :apps:tablet-player:assembleDebug --no-daemon
       - name: Verify and stage exact APK artifact
         shell: bash
@@ -80,6 +91,7 @@ jobs:
           grep -F "versionName='$EXPECTED_VERSION_NAME'" "$OUT/AAPT_BADGING.txt"
           grep -F "package: name='com.stagecore.player.mjpegtrial'" "$OUT/AAPT_BADGING.txt"
       - name: Upload tablet player debug APK
+        if: github.head_ref != 'integration/protected-camera-relay-v1'
         uses: actions/upload-artifact@v4
         with:
           name: stagecore-player-debug-apk
