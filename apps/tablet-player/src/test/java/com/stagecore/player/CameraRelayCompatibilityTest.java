@@ -7,7 +7,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
 
 import okhttp3.Request;
@@ -20,7 +20,7 @@ public class CameraRelayCompatibilityTest {
     @Test public void matchesPinnedHubRequestAndReadsItsFrameFormat() throws Exception {
         String path = System.getenv("STAGECORE_CAMERA_CONTRACT");
         assumeNotNull(path);
-        JSONObject contract = new JSONObject(Files.readString(Path.of(path)));
+        JSONObject contract = new JSONObject(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8));
         assertEquals(1, contract.getInt("version"));
         assertEquals("TABLET_LIVE_SHOW", contract.getString("command"));
         assertEquals(CameraRelayStream.MEDIA_KEY,
