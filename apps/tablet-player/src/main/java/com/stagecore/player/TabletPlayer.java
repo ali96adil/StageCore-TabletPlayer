@@ -255,6 +255,7 @@ public final class TabletPlayer {
                     notifyLiveError(commandListener, reason);
                 }
                 @Override public void onAuthorityLost() {
+                    hideLive();
                     showStatus("Camera Relay authority ended");
                     if (commandListener != null) commandListener.onAuthorityLost();
                 }
